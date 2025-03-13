@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from elasticsearch import Elasticsearch
 
 # Define PostgreSQL connection
-DATABASE_URL = "postgresql+psycopg2://postgres:Sachi89@localhost:5432/postgres"
+DATABASE_URL = "postgresql+psycopg2://postgres:fiuKPKHpMoBfaMwolXFpTXjaIvdmmGRb@mainline.proxy.rlwy.net:36366/railway"
 
 # Create the engine
 engine = create_engine(DATABASE_URL)
