@@ -1,0 +1,19 @@
+import sqlite3
+import csv
+
+# Connect to the SQLite database
+connection = sqlite3.connect("videos.db")
+cursor = connection.cursor()
+
+# Execute a query to fetch data
+cursor.execute("SELECT * FROM videos;")
+data = cursor.fetchall()
+print(data)
+# Write data to CSV file
+with open("output_file.csv", "w", newline="") as f:
+    writer = csv.writer(f)
+    writer.writerow([description[0] for description in cursor.description])  # Write headers
+    writer.writerows(data)
+
+# Close connection
+connection.close()
