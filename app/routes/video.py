@@ -34,11 +34,11 @@ def upload_video(
 ):
     video = {"title": title, "description": description}
     print(tfile.filename)
-    vfile_path = f"C:\\mobileapp\\myapp\\backend\\tmp\\{vfile.filename}"
+    vfile_path = f"tmp/{vfile.filename}"
     with open(vfile_path, "wb") as buffer:
         buffer.write(vfile.file.read())
     vfile_url = upload_to_s3(vfile_path, vfile.filename)
-    tfile_path = f"C:\\mobileapp\\myapp\\backend\\tmp\\{tfile.filename}"
+    tfile_path = f"tmp/{tfile.filename}"
     with open(tfile_path, "wb") as buffer:
         buffer.write(tfile.file.read())
     tfile_url = upload_to_s3(tfile_path, tfile.filename)
