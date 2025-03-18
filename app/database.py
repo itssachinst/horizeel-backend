@@ -3,7 +3,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 from elasticsearch import Elasticsearch
 
 # Define PostgreSQL connection
-DATABASE_URL = "postgresql+psycopg2://postgres:Sachi89@localhost:5432/postgres"
+DATABASE_URL = "postgresql+psycopg2://sachin:sachin56@horizeel-db.cbs2ca4ao43p.eu-north-1.rds.amazonaws.com:5432/postgres"
 
 # Create the engine
 engine = create_engine(DATABASE_URL)
@@ -17,6 +17,18 @@ Base = declarative_base()
 # Elasticsearch Connection
 ELASTICSEARCH_HOST = "http://localhost:9200"
 es = Elasticsearch([ELASTICSEARCH_HOST])
+
+# Add get_db dependency function
+def get_db():
+    """
+    Dependency function to get a database session.
+    Yields a session and ensures it's closed after use.
+    """
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 def init_db():
     """Initialize the database and create tables."""

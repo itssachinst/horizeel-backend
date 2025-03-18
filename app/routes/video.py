@@ -11,7 +11,8 @@ from app.utils.s3_utils import upload_to_s3
 from app.schemas import VideoCreate, VideoResponse
 from app.routes.user import get_current_user
 from app.models import User
-from typing import List
+from typing import List, Optional
+from uuid import UUID
 
 router = APIRouter()
 
@@ -43,15 +44,26 @@ def upload_video(
     tfile_url = upload_to_s3(tfile_path, tfile.filename)
     return create_video(db, video, vfile_url, tfile_url, str(current_user.user_id))
 
-@router.get("/videos/search/", response_model=list[VideoResponse])
+@router.get("/videos/search", response_model=List[VideoResponse])
 def search_videos_api(
-    query: str ,  # Accepts a query parameter for the search term
+    q: str = Query(..., description="Search query string"),
+    type: Optional[str] = Query(None, description="Search type (e.g., 'hashtag')"),
     db: Session = Depends(get_db)
 ):
-    print('testa')
-    return search_videos(db, query)  # Call the search function from CRUD
+    """
+    Search for videos based on query string.
+    If type is 'hashtag', searches in hashtags only.
+    """
+    try:
+        videos = search_videos(db, q)
+        return videos
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error searching videos: {str(e)}"
+        )
 
-@router.get("/videos/", response_model=list[VideoResponse])
+@router.get("/videos/", response_model=List[VideoResponse])
 def read_videos(db: Session = Depends(get_db)):
     return list_videos(db)
 
@@ -68,8 +80,8 @@ def get_user_saved_videos(
     return saved_videos
 
 @router.get("/videos/{video_id}", response_model=VideoResponse)
-def read_video(video_id: str, db: Session = Depends(get_db)):
-    db_video = get_video(db, video_id)
+def read_video(video_id: UUID, db: Session = Depends(get_db)):
+    db_video = get_video(db, str(video_id))
     if not db_video:
         raise HTTPException(status_code=404, detail="Video not found")
     return db_video

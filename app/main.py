@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.routes.video import router as video_router
 from app.routes.user import router as user_router
+from app.routes.auth import router as auth_router
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -15,3 +16,4 @@ app.add_middleware(
 )
 app.include_router(video_router, prefix="/api")
 app.include_router(user_router, prefix="/api/users")
+app.include_router(auth_router, prefix="/api/auth")

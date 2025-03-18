@@ -4,16 +4,18 @@ from app.schemas import VideoCreate, UserCreate, UserUpdate
 from sqlalchemy import or_, func, and_
 from uuid import uuid4
 from datetime import datetime, timedelta
-from jose import jwt
+from jose import jwt, JWTError
 from passlib.context import CryptContext
+from typing import Optional
+from fastapi import HTTPException, status
 
 # Password hashing setup
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT setup
-SECRET_KEY = "YOUR_SECRET_KEY"  # In production, use a secure key
+SECRET_KEY = "your-secret-key-keep-it-secret"  # Change this in production!
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 1 day
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 def create_video(db: Session, video: VideoCreate, vfile_url: str, tfile_url: str, user_id: str = None):
     db_video = Video(
@@ -81,8 +83,32 @@ def video_subscribers_increment(db: Session, video_id: int):
     return video.subscribers
 
 def search_videos(db: Session, query: str):
-    # Use SQLAlchemy ORM to filter videos based on title and description
-    videos = db.query(Video).filter(or_(Video.title.like(f"%{query}%"), Video.description.like(f"%{query}%"))).all()
+    """
+    Search for videos based on title, description, or hashtags.
+    Returns a list of matching videos.
+    """
+    if not query:
+        return []
+        
+    # Clean the query string
+    query = query.strip()
+    
+    # Create the base query
+    base_query = db.query(Video)
+    
+    # If query is a hashtag (starts with #), search in description
+    if query.startswith('#'):
+        # Remove the # symbol and search for the hashtag in description
+        hashtag = query[1:]
+        videos = base_query.filter(Video.description.ilike(f"%#{hashtag}%")).all()
+    else:
+        # Search in both title and description
+        videos = base_query.filter(
+            or_(
+                Video.title.ilike(f"%{query}%"),
+                Video.description.ilike(f"%{query}%")
+            )
+        ).all()
     
     # For each video, fetch the username if user_id is present
     for video in videos:
@@ -94,30 +120,16 @@ def search_videos(db: Session, query: str):
     return videos
 
 # User CRUD operations
-def get_user_by_email(db: Session, email: str):
+def get_user_by_email(db: Session, email: str) -> Optional[User]:
+    """Get a user by email."""
     return db.query(User).filter(User.email == email).first()
 
 def get_user_by_username(db: Session, username: str):
     return db.query(User).filter(User.username == username).first()
 
-def get_user_by_id(db: Session, user_id: str):
-    user = db.query(User).filter(User.user_id == user_id).first()
-    
-    if user:
-        # Get follower and following counts
-        followers_count = db.query(func.count(UserFollow.id)).filter(
-            UserFollow.followed_id == user_id
-        ).scalar()
-        
-        following_count = db.query(func.count(UserFollow.id)).filter(
-            UserFollow.follower_id == user_id
-        ).scalar()
-        
-        # Set the counts as attributes
-        user.followers_count = followers_count
-        user.following_count = following_count
-    
-    return user
+def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+    """Get a user by ID."""
+    return db.query(User).filter(User.id == user_id).first()
 
 def get_users(db: Session, skip: int = 0, limit: int = 100):
     users = db.query(User).offset(skip).limit(limit).all()
@@ -139,7 +151,7 @@ def get_users(db: Session, skip: int = 0, limit: int = 100):
     return users
 
 def create_user(db: Session, user: UserCreate):
-    # Hash password and create user
+    """Create a new user."""
     hashed_password = pwd_context.hash(user.password)
     db_user = User(
         user_id=uuid4(),
@@ -181,22 +193,26 @@ def delete_user(db: Session, user_id: str):
     return True
 
 # Authentication functions
-def verify_password(plain_password, hashed_password):
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a password against its hash."""
     return pwd_context.verify(plain_password, hashed_password)
 
-def authenticate_user(db: Session, email: str, password: str):
+def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
+    """Authenticate a user by email and password."""
     user = get_user_by_email(db, email)
-    if not user or not verify_password(password, user.password_hash):
-        return False
+    if not user:
+        return None
+    if not verify_password(password, user.password_hash):
+        return None
     return user
 
-def create_access_token(data: dict, expires_delta: timedelta = None):
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a JWT access token."""
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -441,3 +457,7 @@ def get_follow_stats(db: Session, user_id: str):
         "followers_count": followers_count,
         "following_count": following_count
     }
+
+def get_password_hash(password: str) -> str:
+    """Hash a password using bcrypt."""
+    return pwd_context.hash(password)
