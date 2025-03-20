@@ -298,7 +298,7 @@ def delete_video_endpoint(
     return {"message": "Video deleted successfully"}
 
 @router.get("/search")
-def search_videos(
+def search_videos_route(
     q: str = Query(None, min_length=1, description="Search query string"),
     type: str = Query("text", description="Search type: 'text' or 'hashtag'"),
     skip: int = Query(0, ge=0, description="Number of videos to skip"),
