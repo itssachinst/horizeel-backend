@@ -108,7 +108,7 @@ def video_views_increment(db: Session, video_id: Union[str, uuid4]):
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
             
-        # Increment views
+    # Increment views
         video.views += 1
         db.commit()
         return video.views
