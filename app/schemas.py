@@ -68,7 +68,7 @@ class Token(BaseModel):
     token_type: str
 
 class TokenData(BaseModel):
-    user_id: str
+    user_id: str  # Contains the user's UUID as a string
 
 # Follow schemas
 class FollowCreate(BaseModel):

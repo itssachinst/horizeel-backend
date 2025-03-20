@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Form, Query, status
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Form, Query, status, Path
 from sqlalchemy.orm import Session
-from app.database import SessionLocal
+from app.database import SessionLocal, get_db
 from app.crud import (
     create_video, get_video, list_videos, video_views_increment, 
-    video_likes_increment, video_dislikes_increment, video_subscribers_increment, 
+    video_likes_increment, video_dislikes_increment, 
     search_videos, save_video_for_user, unsave_video_for_user, 
     get_saved_videos_for_user, check_video_saved, delete_video
 )
@@ -13,8 +13,9 @@ from app.routes.user import get_current_user
 from app.models import User
 from typing import List, Optional
 from uuid import UUID
+from pydantic import BaseModel, Field, validator
 
-router = APIRouter()
+router = APIRouter(tags=["videos"])
 
 def get_db():
     db = SessionLocal()
@@ -22,6 +23,27 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# Define pagination parameters model for better validation
+class PaginationParams:
+    def __init__(
+        self,
+        skip: int = Query(0, ge=0, description="Number of items to skip"),
+        limit: int = Query(20, ge=1, le=100, description="Maximum number of items to return")
+    ):
+        self.skip = skip
+        self.limit = limit
+
+# Search parameters validation model
+class SearchParams(BaseModel):
+    query: str = Field(..., min_length=1, max_length=100)
+    type: str = Field("text", pattern="^(text|hashtag)$")
+    
+    @validator('query')
+    def validate_query(cls, v):
+        if v.strip() == "":
+            raise ValueError("Search query cannot be empty or just whitespace")
+        return v
 
 @router.post("/videos/", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
 def upload_video(
@@ -45,27 +67,61 @@ def upload_video(
     return create_video(db, video, vfile_url, tfile_url, str(current_user.user_id))
 
 @router.get("/videos/search", response_model=List[VideoResponse])
-def search_videos_api(
-    q: str = Query(..., description="Search query string"),
-    type: Optional[str] = Query(None, description="Search type (e.g., 'hashtag')"),
+def search_videos_endpoint(
+    q: str = Query(..., min_length=1, description="Search query string"),
+    type: str = Query("text", description="Search type: 'text' or 'hashtag'"),
+    skip: int = Query(0, ge=0, description="Number of videos to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of videos to return"),
     db: Session = Depends(get_db)
 ):
     """
-    Search for videos based on query string.
-    If type is 'hashtag', searches in hashtags only.
+    Search for videos by query string.
+    
+    - **q**: Search query string
+    - **type**: Search type ('text' or 'hashtag')
+    - **skip**: Number of videos to skip (pagination offset)
+    - **limit**: Maximum number of videos to return (pagination limit)
     """
+    if not q or q.strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Search query is required and cannot be empty"
+        )
+    
+    if type not in ["text", "hashtag"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Search type must be 'text' or 'hashtag'"
+        )
+    
     try:
-        videos = search_videos(db, q)
+        videos = search_videos(db, query=q, skip=skip, limit=limit, search_type=type)
         return videos
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error searching videos: {str(e)}"
+            detail=f"Search failed: {str(e)}"
         )
 
 @router.get("/videos/", response_model=List[VideoResponse])
-def read_videos(db: Session = Depends(get_db)):
-    return list_videos(db)
+def read_videos(
+    pagination: PaginationParams = Depends(),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a paginated list of videos.
+    
+    - **skip**: Number of videos to skip (pagination offset)
+    - **limit**: Maximum number of videos to return (pagination limit)
+    """
+    try:
+        videos = list_videos(db, skip=pagination.skip, limit=pagination.limit)
+        return videos
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve videos: {str(e)}"
+        )
 
 @router.get("/videos/saved", response_model=List[VideoResponse])
 def get_user_saved_videos(
@@ -80,37 +136,87 @@ def get_user_saved_videos(
     return saved_videos
 
 @router.get("/videos/{video_id}", response_model=VideoResponse)
-def read_video(video_id: UUID, db: Session = Depends(get_db)):
-    db_video = get_video(db, str(video_id))
-    if not db_video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    return db_video
+def read_video(
+    video_id: UUID = Path(..., description="The UUID of the video to retrieve"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a specific video by its ID.
+    
+    - **video_id**: UUID of the video to retrieve
+    """
+    try:
+        video = get_video(db, video_id)
+        if video is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Video with ID {video_id} not found"
+            )
+        return video
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve video: {str(e)}"
+        )
 
-@router.post("/videos/{video_id}/view")
-def increment_video_views(video_id: str, db: Session = Depends(get_db)):
-    # Fetch the video by ID
-    views = video_views_increment(db,video_id=video_id)
-    return {"message": "View count incremented successfully", "views": views}
+@router.post("/videos/{video_id}/view", response_model=dict)
+def increment_view(
+    video_id: UUID = Path(..., description="The UUID of the video to increment views"),
+    db: Session = Depends(get_db)
+):
+    """
+    Increment the view count for a specific video.
+    
+    - **video_id**: UUID of the video to increment views
+    """
+    try:
+        views = video_views_increment(db, video_id)
+        return {"views": views}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to increment view count: {str(e)}"
+        )
 
-@router.post("/videos/{video_id}/like")
-def increment_video_views(video_id: str, db: Session = Depends(get_db)):
-    # Fetch the video by ID
-    likes = video_likes_increment(db,video_id=video_id)
-    return {"message": "View count incremented successfully", "likes": likes}
+@router.post("/videos/{video_id}/like", response_model=dict)
+def increment_like(
+    video_id: UUID = Path(..., description="The UUID of the video to like"),
+    db: Session = Depends(get_db)
+):
+    """
+    Increment the like count for a specific video.
+    
+    - **video_id**: UUID of the video to like
+    """
+    try:
+        likes = video_likes_increment(db, video_id)
+        return {"likes": likes}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to increment like count: {str(e)}"
+        )
 
-@router.post("/videos/{video_id}/dislike")
-def increment_video_views(video_id: str, db: Session = Depends(get_db)):
-    # Fetch the video by ID
-    dislikes = video_dislikes_increment(db,video_id=video_id)
-    return {"message": "View count incremented successfully", "dislikes": dislikes}
-
-@router.post("/videos/{video_id}/subscribe")
-def increment_video_subscribers(video_id: str, db: Session = Depends(get_db)):
-    # Fetch the video by ID
-    db_video = get_video(db, video_id)
-    if not db_video:
-        raise HTTPException(status_code=404, detail="Video not found")
-    return video_subscribers_increment(db, video_id)
+@router.post("/videos/{video_id}/dislike", response_model=dict)
+def increment_dislike(
+    video_id: UUID = Path(..., description="The UUID of the video to dislike"),
+    db: Session = Depends(get_db)
+):
+    """
+    Increment the dislike count for a specific video.
+    
+    - **video_id**: UUID of the video to dislike
+    """
+    try:
+        dislikes = video_dislikes_increment(db, video_id)
+        return {"dislikes": dislikes}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to increment dislike count: {str(e)}"
+        )
 
 # New routes for saved videos
 
@@ -190,3 +296,25 @@ def delete_video_endpoint(
         )
     
     return {"message": "Video deleted successfully"}
+
+@router.get("/search")
+def search_videos(
+    q: str = Query(None, min_length=1, description="Search query string"),
+    type: str = Query("text", description="Search type: 'text' or 'hashtag'"),
+    skip: int = Query(0, ge=0, description="Number of videos to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of videos to return"),
+    db: Session = Depends(get_db)
+):
+    """
+    Search for videos by query string.
+    
+    - **q**: Search query string
+    - **type**: Search type ('text' or 'hashtag')
+    - **skip**: Number of videos to skip (pagination offset)
+    - **limit**: Maximum number of videos to return (pagination limit)
+    """
+    if not q:
+        raise HTTPException(status_code=400, detail="Search query is required")
+    
+    videos = search_videos(db, query=q, skip=skip, limit=limit, search_type=type)
+    return videos

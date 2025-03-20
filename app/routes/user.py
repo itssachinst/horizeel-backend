@@ -37,7 +37,8 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         token_data = schemas.TokenData(user_id=user_id)
     except JWTError:
         raise credentials_exception
-    
+
+    # We now store the actual UUID (as string) in the token
     user = crud.get_user_by_id(db, user_id=token_data.user_id)
     if user is None:
         raise credentials_exception

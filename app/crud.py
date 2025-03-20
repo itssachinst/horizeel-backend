@@ -6,8 +6,13 @@ from uuid import uuid4
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from passlib.context import CryptContext
-from typing import Optional
+from typing import Optional, List, Dict, Any, Union
 from fastapi import HTTPException, status
+from functools import lru_cache
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Password hashing setup
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -18,137 +23,275 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 def create_video(db: Session, video: VideoCreate, vfile_url: str, tfile_url: str, user_id: str = None):
-    db_video = Video(
-        video_id=uuid4(),
-        title=video["title"], 
-        description=video["description"], 
-        video_url=vfile_url,
-        thumbnail_url=tfile_url,
-        user_id=user_id
-    )
+    """Create a new video entry in the database"""
+    try:
+        db_video = Video(
+            video_id=uuid4(),
+            title=video["title"],
+            description=video["description"],
+            video_url=vfile_url,
+            thumbnail_url=tfile_url,
+            user_id=user_id
+        )
     db.add(db_video)
     db.commit()
     db.refresh(db_video)
     return db_video
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to create video: {str(e)}")
+        raise
 
-def get_video(db: Session, video_id: int):
-    # Query the video and join with the user table to get username
-    video = db.query(Video).filter(Video.video_id == video_id).first()
-    if video and video.user_id:
-        # Get the username if user is associated
-        user = db.query(User).filter(User.user_id == video.user_id).first()
-        if user:
-            video.username = user.username
-    return video
-
-def list_videos(db: Session):
-    # Get all videos 
-    videos = db.query(Video).all()
-    
-    # For each video, fetch the username if user_id is present
-    for video in videos:
-        if video.user_id:
+def get_video(db: Session, video_id: Union[str, uuid4]):
+    """
+    Get a video by its ID with username.
+    If the video has a user_id, the username will be included.
+    """
+    try:
+        # Query the video
+        video = db.query(Video).filter(Video.video_id == video_id).first()
+        
+        # If video exists and has a user_id, get the username
+        if video and video.user_id:
             user = db.query(User).filter(User.user_id == video.user_id).first()
             if user:
                 video.username = user.username
-    
-    return videos
+        
+        return video
+    except Exception as e:
+        logger.error(f"Failed to get video {video_id}: {str(e)}")
+        raise
 
-def video_views_increment(db: Session, video_id: int):
+# Cache frequently accessed video lists to improve performance
+@lru_cache(maxsize=10)
+def list_videos(db: Session, skip: int = 0, limit: int = 20):
+    """
+    Get a paginated list of videos with user data.
+    Results are cached to improve performance under high load.
+    
+    Args:
+        db: Database session
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+        
+    Returns:
+        List of Video objects
+    """
+    try:
+        # Use pagination to avoid loading all videos at once
+        videos = db.query(Video).order_by(Video.created_at.desc()).offset(skip).limit(limit).all()
+        
+        # Get all user IDs for videos in one query to minimize database calls
+        user_ids = [video.user_id for video in videos if video.user_id]
+        
+        if user_ids:
+            # Get all users in a single query
+            users = {
+                str(user.user_id): user 
+                for user in db.query(User).filter(User.user_id.in_(user_ids)).all()
+            }
+            
+            # Add username to videos
+            for video in videos:
+                if video.user_id and str(video.user_id) in users:
+                    video.username = users[str(video.user_id)].username
+        
+        return videos
+    except Exception as e:
+        logger.error(f"Failed to list videos: {str(e)}")
+        raise
+
+def video_views_increment(db: Session, video_id: Union[str, uuid4]):
+    """Increment view count for a video"""
+    try:
     video = db.query(Video).filter(Video.video_id == video_id).first()
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+            
     # Increment views
     video.views += 1
     db.commit()
     return video.views
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to increment views for video {video_id}: {str(e)}")
+        raise
 
-def video_likes_increment(db: Session, video_id: int):
+def video_likes_increment(db: Session, video_id: Union[str, uuid4]):
+    """Increment like count for a video"""
+    try:
     video = db.query(Video).filter(Video.video_id == video_id).first()
-    # Increment views
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+            
+        # Increment likes
     video.likes += 1
     db.commit()
     return video.likes
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to increment likes for video {video_id}: {str(e)}")
+        raise
 
-def video_dislikes_increment(db: Session, video_id: int):
+def video_dislikes_increment(db: Session, video_id: Union[str, uuid4]):
+    """Increment dislike count for a video"""
+    try:
     video = db.query(Video).filter(Video.video_id == video_id).first()
-    # Increment views
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+            
+        # Increment dislikes
     video.dislikes += 1
     db.commit()
     return video.dislikes
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to increment dislikes for video {video_id}: {str(e)}")
+        raise
 
-def video_subscribers_increment(db: Session, video_id: int):
-    video = db.query(Video).filter(Video.video_id == video_id).first()
-    # Increment views
-    video.subscribers += 1
-    db.commit()
-    return video.subscribers
-
-def search_videos(db: Session, query: str):
+def search_videos(db: Session, query: str, skip: int = 0, limit: int = 20, search_type: str = "text"):
     """
-    Search for videos based on title, description, or hashtags.
-    Returns a list of matching videos.
+    Search for videos with pagination and query optimization.
+    
+    Args:
+        db: Database session
+        query: Search query string
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+        search_type: Type of search ('text' or 'hashtag')
+        
+    Returns:
+        List of Video objects matching search criteria
     """
     if not query:
         return []
+
+    try:
+        # Clean the query string
+        query = query.strip()
         
-    # Clean the query string
-    query = query.strip()
-    
-    # Create the base query
-    base_query = db.query(Video)
-    
-    # If query is a hashtag (starts with #), search in description
-    if query.startswith('#'):
-        # Remove the # symbol and search for the hashtag in description
-        hashtag = query[1:]
-        videos = base_query.filter(Video.description.ilike(f"%#{hashtag}%")).all()
-    else:
-        # Search in both title and description
-        videos = base_query.filter(
-            or_(
-                Video.title.ilike(f"%{query}%"),
-                Video.description.ilike(f"%{query}%")
-            )
-        ).all()
-    
-    # For each video, fetch the username if user_id is present
-    for video in videos:
-        if video.user_id:
-            user = db.query(User).filter(User.user_id == video.user_id).first()
-            if user:
-                video.username = user.username
-    
-    return videos
+        # Base query with pagination
+        base_query = db.query(Video)
+        
+        # Different search strategies based on search type
+        if search_type == "hashtag":
+            # For hashtag searches, use a more specific LIKE pattern
+            search_pattern = f"%#{query}%"
+            results = base_query.filter(
+                or_(
+                    Video.description.ilike(search_pattern),
+                    Video.title.ilike(search_pattern)
+                )
+            ).order_by(Video.created_at.desc()).offset(skip).limit(limit).all()
+        else:
+            # For text searches, split query into keywords for better matching
+            keywords = query.split()
+            conditions = []
+            
+            for keyword in keywords:
+                pattern = f"%{keyword}%"
+                conditions.append(or_(
+                    Video.title.ilike(pattern),
+                    Video.description.ilike(pattern)
+                ))
+            
+            # Combine all conditions with OR
+            results = base_query.filter(or_(*conditions)).order_by(
+                Video.created_at.desc()
+            ).offset(skip).limit(limit).all()
+        
+        # Populate usernames
+        user_ids = [video.user_id for video in results if video.user_id]
+        
+        if user_ids:
+            users = {
+                str(user.user_id): user.username
+                for user in db.query(User).filter(User.user_id.in_(user_ids)).all()
+            }
+            
+            for video in results:
+                if video.user_id and str(video.user_id) in users:
+                    video.username = users[str(video.user_id)]
+        
+        return results
+    except Exception as e:
+        logger.error(f"Failed to search videos with query '{query}': {str(e)}")
+        raise
 
 # User CRUD operations
 def get_user_by_email(db: Session, email: str) -> Optional[User]:
     """Get a user by email."""
-    return db.query(User).filter(User.email == email).first()
+    try:
+        return db.query(User).filter(User.email == email).first()
+    except Exception as e:
+        logger.error(f"Failed to get user by email '{email}': {str(e)}")
+        raise
 
 def get_user_by_username(db: Session, username: str):
-    return db.query(User).filter(User.username == username).first()
+    """Get a user by username."""
+    try:
+        return db.query(User).filter(User.username == username).first()
+    except Exception as e:
+        logger.error(f"Failed to get user by username '{username}': {str(e)}")
+        raise
 
-def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+def get_user_by_id(db: Session, user_id: Union[str, uuid4]) -> Optional[User]:
     """Get a user by ID."""
-    return db.query(User).filter(User.id == user_id).first()
+    try:
+        return db.query(User).filter(User.user_id == user_id).first()
+    except Exception as e:
+        logger.error(f"Failed to get user by ID '{user_id}': {str(e)}")
+        raise
 
-def get_users(db: Session, skip: int = 0, limit: int = 100):
-    users = db.query(User).offset(skip).limit(limit).all()
-    
-    # Get follower and following counts for each user
-    for user in users:
-        followers_count = db.query(func.count(UserFollow.id)).filter(
-            UserFollow.followed_id == user.user_id
-        ).scalar()
+def get_users(db: Session, skip: int = 0, limit: int = 20):
+    """Get a paginated list of users."""
+    try:
+        users = db.query(User).offset(skip).limit(limit).all()
         
-        following_count = db.query(func.count(UserFollow.id)).filter(
-            UserFollow.follower_id == user.user_id
-        ).scalar()
+        # Get follower and following counts for users in a single query
+        user_ids = [user.user_id for user in users]
         
-        # Set the counts as attributes
-        user.followers_count = followers_count
-        user.following_count = following_count
-    
-    return users
+        if user_ids:
+            # Get follower counts in a single query
+            follower_counts = db.query(
+                UserFollow.followed_id, 
+                func.count(UserFollow.id).label('count')
+            ).filter(
+                UserFollow.followed_id.in_(user_ids)
+            ).group_by(
+                UserFollow.followed_id
+            ).all()
+            
+            follower_map = {str(followed_id): count for followed_id, count in follower_counts}
+            
+            # Get following counts in a single query
+            following_counts = db.query(
+                UserFollow.follower_id, 
+                func.count(UserFollow.id).label('count')
+            ).filter(
+                UserFollow.follower_id.in_(user_ids)
+            ).group_by(
+                UserFollow.follower_id
+            ).all()
+            
+            following_map = {str(follower_id): count for follower_id, count in following_counts}
+            
+            # Add counts to user objects
+            for user in users:
+                user_id_str = str(user.user_id)
+                user.followers_count = follower_map.get(user_id_str, 0)
+                user.following_count = following_map.get(user_id_str, 0)
+                
+        return users
+    except Exception as e:
+        logger.error(f"Failed to get users: {str(e)}")
+        raise
 
 def create_user(db: Session, user: UserCreate):
     """Create a new user."""
@@ -199,23 +342,31 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def authenticate_user(db: Session, email: str, password: str) -> Optional[User]:
     """Authenticate a user by email and password."""
-    user = get_user_by_email(db, email)
-    if not user:
-        return None
-    if not verify_password(password, user.password_hash):
-        return None
-    return user
+    try:
+        user = get_user_by_email(db, email)
+        if not user:
+            return None
+        if not verify_password(password, user.password_hash):
+            return None
+        return user
+    except Exception as e:
+        logger.error(f"Failed to authenticate user: {str(e)}")
+        raise
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token."""
-    to_encode = data.copy()
-    if expires_delta:
-        expire = datetime.utcnow() + expires_delta
-    else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+    try:
+        to_encode = data.copy()
+        if expires_delta:
+            expire = datetime.utcnow() + expires_delta
+        else:
+            expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        to_encode.update({"exp": expire})
+        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        return encoded_jwt
+    except Exception as e:
+        logger.error(f"Failed to create access token: {str(e)}")
+        raise
 
 # New functions for saved videos
 
