@@ -33,10 +33,10 @@ def create_video(db: Session, video: VideoCreate, vfile_url: str, tfile_url: str
             thumbnail_url=tfile_url,
             user_id=user_id
         )
-    db.add(db_video)
-    db.commit()
-    db.refresh(db_video)
-    return db_video
+        db.add(db_video)
+        db.commit()
+        db.refresh(db_video)
+        return db_video
     except Exception as e:
         db.rollback()
         logger.error(f"Failed to create video: {str(e)}")
@@ -104,14 +104,14 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20):
 def video_views_increment(db: Session, video_id: Union[str, uuid4]):
     """Increment view count for a video"""
     try:
-    video = db.query(Video).filter(Video.video_id == video_id).first()
+        video = db.query(Video).filter(Video.video_id == video_id).first()
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
             
-    # Increment views
-    video.views += 1
-    db.commit()
-    return video.views
+        # Increment views
+        video.views += 1
+        db.commit()
+        return video.views
     except HTTPException:
         raise
     except Exception as e:
@@ -122,14 +122,14 @@ def video_views_increment(db: Session, video_id: Union[str, uuid4]):
 def video_likes_increment(db: Session, video_id: Union[str, uuid4]):
     """Increment like count for a video"""
     try:
-    video = db.query(Video).filter(Video.video_id == video_id).first()
+        video = db.query(Video).filter(Video.video_id == video_id).first()
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
             
         # Increment likes
-    video.likes += 1
-    db.commit()
-    return video.likes
+        video.likes += 1
+        db.commit()
+        return video.likes
     except HTTPException:
         raise
     except Exception as e:
@@ -140,14 +140,14 @@ def video_likes_increment(db: Session, video_id: Union[str, uuid4]):
 def video_dislikes_increment(db: Session, video_id: Union[str, uuid4]):
     """Increment dislike count for a video"""
     try:
-    video = db.query(Video).filter(Video.video_id == video_id).first()
+        video = db.query(Video).filter(Video.video_id == video_id).first()
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
             
         # Increment dislikes
-    video.dislikes += 1
-    db.commit()
-    return video.dislikes
+        video.dislikes += 1
+        db.commit()
+        return video.dislikes
     except HTTPException:
         raise
     except Exception as e:
