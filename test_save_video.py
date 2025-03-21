@@ -12,7 +12,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app.database import SessionLocal
 from app.crud import get_video, check_video_saved
-from app.routes.user import get_current_user
+from app.utils.auth import get_current_user
 
 def test_save_video():
     """Test the save video endpoint."""

@@ -1,48 +1,24 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Body
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 from datetime import timedelta
-from typing import List
+from typing import List, Optional
 
-from app.database import SessionLocal
 from app import crud, schemas
 from app.crud import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
+from app.utils.auth import get_current_user, get_db
+from app.utils.s3_utils import upload_profile_image_to_s3
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["users"])
 
-# Dependency
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
 # OAuth2 scheme for token authentication
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
-
-# Get current user from token
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-        token_data = schemas.TokenData(user_id=user_id)
-    except JWTError:
-        raise credentials_exception
-
-    # We now store the actual UUID (as string) in the token
-    user = crud.get_user_by_id(db, user_id=token_data.user_id)
-    if user is None:
-        raise credentials_exception
-    return user
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # User registration endpoint
 @router.post("/register", response_model=schemas.UserResponse, status_code=status.HTTP_201_CREATED)
@@ -264,4 +240,76 @@ def get_follow_stats(
     
     # Get stats
     stats = crud.get_follow_stats(db, user_id=user_id)
-    return stats 
+    return stats
+
+@router.put("/profile", response_model=schemas.UserResponse)
+async def update_user_profile(
+    profile: schemas.UserProfile,
+    db: Session = Depends(get_db),
+    current_user: schemas.UserResponse = Depends(get_current_user)
+):
+    """
+    Update the current user's profile information
+    """
+    try:
+        updated_user = crud.update_user_profile(
+            db=db, 
+            user_id=current_user.user_id, 
+            profile_data=profile.dict(exclude_unset=True)
+        )
+        
+        if not updated_user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        return updated_user
+    except Exception as e:
+        logger.error(f"Error updating user profile: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")
+
+@router.post("/upload-profile-image", response_model=dict)
+async def upload_profile_image(
+    profileImage: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: schemas.UserResponse = Depends(get_current_user)
+):
+    """
+    Upload a profile image for the current user
+    """
+    try:
+        # Check file type
+        if not profileImage.content_type.startswith('image/'):
+            raise HTTPException(status_code=400, detail="File must be an image")
+            
+        # Upload image to S3
+        profile_image_url = await upload_profile_image_to_s3(
+            file=profileImage,
+            user_id=str(current_user.user_id)
+        )
+        
+        # Update user's profile_picture field in database
+        updated_user = crud.update_user_profile(
+            db=db,
+            user_id=current_user.user_id,
+            profile_data={"profile_picture": profile_image_url}
+        )
+        
+        if not updated_user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        return {"profileImageUrl": profile_image_url}
+    except Exception as e:
+        logger.error(f"Error uploading profile image: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload profile image: {str(e)}")
+
+@router.get("/{user_id}/follow-stats", response_model=dict)
+def get_follow_stats(user_id: int, db: Session = Depends(get_db)):
+    """
+    Get the follower and following counts for a user
+    """
+    follower_count = crud.get_follower_count(db, user_id)
+    following_count = crud.get_following_count(db, user_id)
+    
+    return {
+        "followers_count": follower_count,
+        "following_count": following_count
+    } 

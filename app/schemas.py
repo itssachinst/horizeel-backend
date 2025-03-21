@@ -1,7 +1,7 @@
 from pydantic import BaseModel, validator, EmailStr
 from datetime import datetime
 from uuid import UUID
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 class VideoCreate(BaseModel):
     title: str
@@ -106,3 +106,14 @@ class FollowerResponse(BaseModel):
 class FollowStats(BaseModel):
     followers_count: int
     following_count: int
+
+class UserProfile(BaseModel):
+    """Schema for user profile updates"""
+    username: Optional[str] = None
+    email: Optional[str] = None
+    bio: Optional[str] = None
+    profile_picture: Optional[str] = None
+    social: Optional[Dict[str, str]] = None
+    
+    class Config:
+        orm_mode = True

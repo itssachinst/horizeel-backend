@@ -1,16 +1,17 @@
-from sqlalchemy import Column, String, TIMESTAMP, UUID, BIGINT, Integer, Text, Enum, ForeignKey, Index
+from sqlalchemy import Column, String, TIMESTAMP, UUID, BIGINT, Integer, Text, Enum, ForeignKey, Index, Boolean, DateTime, JSON
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, ENUM
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.database import Base
 import uuid
+from datetime import datetime
 
 class Video(Base):
     __tablename__ = "videos"
 
     video_id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(PGUUID(as_uuid=True), ForeignKey("users.user_id"))  # ForeignKey works now!
-    user = relationship("User", backref="videos")  # Establish relationship with User model
+    uploader = relationship("User", back_populates="videos")  # Changed from user to uploader to match User model
 
     title = Column(String(255), nullable=False)
     description = Column(Text)
@@ -36,16 +37,22 @@ class Video(Base):
 
 
 class User(Base):
+    """User model for database storage"""
     __tablename__ = "users"
 
-    user_id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    username = Column(String(50), unique=True, nullable=False)
-    email = Column(String(255), unique=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    profile_picture = Column(String(512))
-    cover_image = Column(String(512))
-    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
-    updated_at = Column(TIMESTAMP(timezone=True), onupdate=func.now())
+    user_id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True)
+    email = Column(String, unique=True, index=True)
+    password_hash = Column(String)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    bio = Column(String, nullable=True)
+    profile_picture = Column(String, nullable=True)
+    social = Column(JSON, nullable=True)
+    
+    # Relationship
+    videos = relationship("Video", back_populates="uploader", cascade="all, delete-orphan")
 
     # Add relationship to saved videos
     saved_videos = relationship("SavedVideo", back_populates="user")

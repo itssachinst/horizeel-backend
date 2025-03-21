@@ -9,7 +9,7 @@ from app.crud import (
 )
 from app.utils.s3_utils import upload_to_s3
 from app.schemas import VideoCreate, VideoResponse
-from app.routes.user import get_current_user
+from app.utils.auth import get_current_user
 from app.models import User
 from typing import List, Optional
 from uuid import UUID

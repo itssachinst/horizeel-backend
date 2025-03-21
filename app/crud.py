@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Any, Union
 from fastapi import HTTPException, status
 from functools import lru_cache
 import logging
+import uuid
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -612,3 +613,41 @@ def get_follow_stats(db: Session, user_id: str):
 def get_password_hash(password: str) -> str:
     """Hash a password using bcrypt."""
     return pwd_context.hash(password)
+
+def update_user_profile(db: Session, user_id: Union[str, uuid.UUID], profile_data: dict):
+    """
+    Update a user's profile information
+    """
+    user = db.query(User).filter(User.user_id == user_id).first()
+    
+    if not user:
+        return None
+    
+    # Update basic fields
+    if "username" in profile_data:
+        user.username = profile_data["username"]
+    if "email" in profile_data:
+        user.email = profile_data["email"]
+    if "bio" in profile_data:
+        user.bio = profile_data["bio"]
+    if "profile_picture" in profile_data:
+        user.profile_picture = profile_data["profile_picture"]
+    
+    # Update social media fields if they exist in the model
+    if "social" in profile_data and hasattr(user, "social"):
+        social_data = profile_data["social"]
+        if not user.social:
+            user.social = {}
+        
+        # Update each social field
+        for key in ["instagram", "twitter", "facebook", "linkedin"]:
+            if key in social_data:
+                if not user.social:
+                    user.social = {}
+                user.social[key] = social_data[key]
+    
+    # Commit changes
+    db.commit()
+    db.refresh(user)
+
+    return user
