@@ -80,7 +80,7 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20):
     """
     try:
         # Use pagination to avoid loading all videos at once
-        videos = db.query(Video).order_by(Video.created_at.desc()).offset(skip).limit(limit).all()
+        videos = db.query(Video).order_by(Video.views.desc(), Video.likes.desc(), Video.dislikes.desc(), Video.created_at.desc()).offset(skip).limit(limit).all()
         
         # Get all user IDs for videos in one query to minimize database calls
         user_ids = [video.user_id for video in videos if video.user_id]
