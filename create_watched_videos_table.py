@@ -1,5 +1,5 @@
 from app.database import Base, engine, get_db
-from app.models import WatchedVideo
+from app.models import WatchHistory
 import sys
 import logging
 
@@ -8,11 +8,13 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def create_watched_videos_table():
-    """Create the watched_videos table in the database."""
+    """
+    Creates the watched_videos table in the database
+    """
     try:
-        # Create table based on the SQLAlchemy model
-        Base.metadata.create_all(bind=engine, tables=[WatchedVideo.__table__])
-        logger.info("WatchedVideo table created successfully!")
+        # Create only the WatchHistory table
+        Base.metadata.create_all(bind=engine, tables=[WatchHistory.__table__])
+        logger.info("WatchHistory table created successfully!")
         
         # Verify the table was created
         with engine.connect() as conn:

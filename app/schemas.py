@@ -47,18 +47,18 @@ class UserUpdate(BaseModel):
     cover_image: Optional[str] = None
 
 class UserResponse(UserBase):
-    user_id: str
-    profile_picture: Optional[str] = None
-    cover_image: Optional[str] = None
+    user_id: UUID
     created_at: datetime
+    updated_at: datetime
+    bio: Optional[str] = None
+    profile_picture: Optional[str] = None
+    is_active: bool = True
+    is_admin: bool = False
+    social: Optional[Dict[str, str]] = None
+    feedback: Optional[str] = None
+    feedback_updated_at: Optional[datetime] = None
     followers_count: Optional[int] = 0
     following_count: Optional[int] = 0
-    
-    @validator("user_id", pre=True)
-    def convert_uuid(cls, value):
-        if isinstance(value, UUID):
-            return str(value)
-        return value
 
     class Config:
         orm_mode = True
@@ -117,3 +117,14 @@ class UserProfile(BaseModel):
     
     class Config:
         orm_mode = True
+
+class UserFeedback(BaseModel):
+    """Schema for updating user feedback"""
+    feedback: str
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "feedback": "I love this app! It's very intuitive and fun to use."
+            }
+        }

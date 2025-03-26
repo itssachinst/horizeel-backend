@@ -80,4 +80,48 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     user = crud.get_user_by_id(db, user_id=token_data.user_id)
     if user is None:
         raise credentials_exception
+    return user
+
+async def get_current_user_optional(token: Optional[str] = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """
+    Gets the current authenticated user from JWT token if available.
+    Returns None if no valid token is provided.
+    """
+    if not token:
+        return None
+        
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            return None
+        token_data = schemas.TokenData(user_id=user_id)
+    except JWTError:
+        return None
+
+    user = crud.get_user_by_id(db, user_id=token_data.user_id)
     return user 
+
+# Check if user is an admin
+async def is_admin(current_user = Depends(get_current_user)):
+    """
+    Dependency to check if the current user is an admin.
+    This should be used with FastAPI's Depends() to protect admin-only routes.
+    
+    Raises:
+        HTTPException: If user is not an admin
+    
+    Returns:
+        bool: True if the user is an admin
+    """
+    # Replace this with your actual admin check logic
+    # For example, you might check a user role field or specific user IDs
+    is_admin_user = getattr(current_user, "is_admin", False)
+    
+    if not is_admin_user:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized. Admin privileges required."
+        )
+    
+    return True 

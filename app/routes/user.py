@@ -6,8 +6,8 @@ from datetime import timedelta
 from typing import List, Optional
 
 from app import crud, schemas
-from app.crud import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY
-from app.utils.auth import get_current_user, get_db
+from app.crud import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY, update_user_feedback, get_all_user_feedback
+from app.utils.auth import get_current_user, get_db, is_admin
 from app.utils.s3_utils import upload_profile_image_to_s3
 import logging
 
@@ -312,4 +312,70 @@ def get_follow_stats(user_id: int, db: Session = Depends(get_db)):
     return {
         "followers_count": follower_count,
         "following_count": following_count
-    } 
+    }
+
+@router.post("/feedback", response_model=schemas.UserResponse)
+async def submit_user_feedback(
+    feedback_data: schemas.UserFeedback,
+    current_user: schemas.UserResponse = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Submit feedback for the current user
+    
+    - **feedback**: Feedback text from the user
+    
+    Returns:
+        Updated user object with feedback
+    """
+    try:
+        updated_user = update_user_feedback(
+            db=db,
+            user_id=current_user.user_id,
+            feedback=feedback_data.feedback
+        )
+        
+        if not updated_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+            
+        logger.info(f"User {current_user.user_id} submitted feedback")
+        return updated_user
+    except Exception as e:
+        logger.error(f"Error submitting feedback: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to submit feedback: {str(e)}"
+        )
+
+@router.get("/feedback", response_model=List[schemas.UserResponse])
+async def get_all_feedback(
+    skip: int = 0,
+    limit: int = 100,
+    current_user: schemas.UserResponse = Depends(get_current_user),
+    is_admin_user: bool = Depends(is_admin),
+    db: Session = Depends(get_db)
+):
+    """
+    Get all user feedback (admin only)
+    
+    This endpoint allows administrators to retrieve all user feedback.
+    
+    - **skip**: Number of records to skip (pagination)
+    - **limit**: Maximum number of records to return (pagination)
+    
+    Returns:
+        List of user objects with feedback
+    """
+    try:
+        # The is_admin dependency will raise an exception if user is not an admin
+        users_with_feedback = get_all_user_feedback(db, skip=skip, limit=limit)
+        return users_with_feedback
+    except Exception as e:
+        logger.error(f"Error retrieving feedback: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve feedback: {str(e)}"
+        ) 

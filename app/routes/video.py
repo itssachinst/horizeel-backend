@@ -9,13 +9,14 @@ from app.crud import (
 )
 from app.utils.s3_utils import upload_to_s3
 from app.schemas import VideoCreate, VideoResponse
-from app.utils.auth import get_current_user
-from app.models import User, Video, WatchedVideo
+from app.utils.auth import get_current_user, get_current_user_optional
+from app.models import User, Video, WatchHistory, Like
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm.exc import NoResultFound
 from datetime import datetime
+from sqlalchemy import not_
 
 router = APIRouter(tags=["videos"])
 
@@ -108,16 +109,27 @@ def search_videos_endpoint(
 @router.get("/videos/", response_model=List[VideoResponse])
 def read_videos(
     pagination: PaginationParams = Depends(),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """
-    Get a paginated list of videos.
+    Get a personalized list of videos.
     
     - **skip**: Number of videos to skip (pagination offset)
     - **limit**: Maximum number of videos to return (pagination limit)
+    
+    For authenticated users, returns a personalized feed based on:
+    - Watch history
+    - Liked videos
+    - Followed creators
+    - Trending videos
+    - New videos
+    
+    For unauthenticated users, returns trending videos.
     """
     try:
-        videos = list_videos(db, skip=pagination.skip, limit=pagination.limit)
+        user_id = str(current_user.user_id) if current_user else None
+        videos = list_videos(db, skip=pagination.skip, limit=pagination.limit, user_id=user_id)
         return videos
     except Exception as e:
         raise HTTPException(
@@ -372,14 +384,14 @@ async def update_watch_history(
             )
         
         # Try to get existing watch record
-        watch_record = db.query(WatchedVideo).filter(
-            WatchedVideo.user_id == current_user.user_id,
-            WatchedVideo.video_id == watch_data.video_id
+        watch_record = db.query(WatchHistory).filter(
+            WatchHistory.user_id == current_user.user_id,
+            WatchHistory.video_id == watch_data.video_id
         ).first()
         
         # If no record exists, create a new one
         if not watch_record:
-            watch_record = WatchedVideo(
+            watch_record = WatchHistory(
                 user_id=current_user.user_id,
                 video_id=watch_data.video_id,
                 watch_time=watch_data.watch_time,
@@ -450,10 +462,10 @@ async def get_watch_history(
     Returns the most recently watched videos first.
     """
     try:
-        history = db.query(WatchedVideo).filter(
-            WatchedVideo.user_id == current_user.user_id
+        history = db.query(WatchHistory).filter(
+            WatchHistory.user_id == current_user.user_id
         ).order_by(
-            WatchedVideo.last_watched_at.desc()
+            WatchHistory.last_watched_at.desc()
         ).offset(skip).limit(limit).all()
         
         return history
@@ -474,9 +486,9 @@ async def get_video_watch_stats(
     Get a user's watch statistics for a specific video.
     """
     try:
-        watch_record = db.query(WatchedVideo).filter(
-            WatchedVideo.user_id == current_user.user_id,
-            WatchedVideo.video_id == video_id
+        watch_record = db.query(WatchHistory).filter(
+            WatchHistory.user_id == current_user.user_id,
+            WatchHistory.video_id == video_id
         ).first()
         
         if not watch_record:
@@ -508,9 +520,9 @@ async def delete_watch_history(
     Delete a user's watch history for a specific video.
     """
     try:
-        watch_record = db.query(WatchedVideo).filter(
-            WatchedVideo.user_id == current_user.user_id,
-            WatchedVideo.video_id == video_id
+        watch_record = db.query(WatchHistory).filter(
+            WatchHistory.user_id == current_user.user_id,
+            WatchHistory.video_id == video_id
         ).first()
         
         if not watch_record:

@@ -45,11 +45,14 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     password_hash = Column(String)
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     bio = Column(String, nullable=True)
     profile_picture = Column(String, nullable=True)
     social = Column(JSON, nullable=True)
+    feedback = Column(Text, nullable=True)
+    feedback_updated_at = Column(DateTime, nullable=True)
     
     # Relationship
     videos = relationship("Video", back_populates="uploader", cascade="all, delete-orphan")
@@ -124,7 +127,7 @@ class UserFollow(Base):
     )
 
 
-class WatchedVideo(Base):
+class WatchHistory(Base):
     """Model to track user video view history and engagement metrics"""
     __tablename__ = "watched_videos"
     
@@ -153,11 +156,11 @@ class WatchedVideo(Base):
     device_type = Column(String(50), nullable=True)  # mobile, desktop, tablet, etc.
     
     # Relationships
-    user = relationship("User", backref="watched_videos")
+    user = relationship("User", backref="watch_history")
     video = relationship("Video")
     
     def __repr__(self):
-        return f"WatchedVideo(id={self.id}, user_id={self.user_id}, video_id={self.video_id}, watch_time={self.watch_time}s)"
+        return f"WatchHistory(id={self.id}, user_id={self.user_id}, video_id={self.video_id}, watch_time={self.watch_time}s)"
     
     # Add indexes for common query patterns
     __table_args__ = (
@@ -165,4 +168,28 @@ class WatchedVideo(Base):
         Index('ix_watched_videos_video_id', video_id),  # For analytics on video popularity
         Index('ix_watched_videos_user_video', user_id, video_id, unique=True),  # Ensure one record per user-video pair
         Index('ix_watched_videos_last_watched_at', last_watched_at.desc()),  # For sorting by recently watched
+    )
+
+
+class Like(Base):
+    """Model to track user likes for videos"""
+    __tablename__ = "likes"
+    
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(PGUUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    video_id = Column(PGUUID(as_uuid=True), ForeignKey("videos.video_id"), nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    
+    # Relationships
+    user = relationship("User", backref="likes")
+    video = relationship("Video", backref="likes")
+    
+    def __repr__(self):
+        return f"Like(id={self.id}, user_id={self.user_id}, video_id={self.video_id})"
+    
+    # Add indexes for common query patterns
+    __table_args__ = (
+        Index('ix_likes_user_id', user_id),  # For querying likes by user
+        Index('ix_likes_video_id', video_id),  # For counting likes per video
+        Index('ix_likes_user_video', user_id, video_id, unique=True),  # Ensure a user can like a video only once
     )

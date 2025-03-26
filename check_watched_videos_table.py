@@ -1,107 +1,81 @@
+from app.models import WatchHistory, User, Video
 from app.database import engine, SessionLocal
-from app.models import WatchedVideo, User, Video
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import inspect
 import logging
-from datetime import datetime, timedelta
 import uuid
+from datetime import datetime
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def check_watched_videos_table():
-    """Check if the watched_videos table exists and print its contents."""
+    """
+    Check if the watched_videos table exists and contains data
+    """
     try:
+        # Create a session
         db = SessionLocal()
         
-        # Check if table exists
-        with engine.connect() as conn:
-            result = conn.execute("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'watched_videos')")
-            exists = result.scalar()
-            
-            if not exists:
-                logger.error("The watched_videos table does not exist in the database.")
-                return False
+        # Check if the table exists
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
         
-        # Count records
-        count = db.query(WatchedVideo).count()
-        logger.info(f"Found {count} records in the watched_videos table.")
-        
-        # Display sample data if available
-        if count > 0:
-            samples = db.query(WatchedVideo).limit(5).all()
-            logger.info("\nSample records:")
-            for sample in samples:
-                logger.info(f"ID: {sample.id}")
-                logger.info(f"User ID: {sample.user_id}, Video ID: {sample.video_id}")
-                logger.info(f"Watch time: {sample.watch_time}s, Watch percentage: {sample.watch_percentage}%")
-                logger.info(f"Engagement: Liked={sample.like_flag}, Disliked={sample.dislike_flag}, Saved={sample.saved_flag}, Shared={sample.shared_flag}")
-                logger.info(f"Last watched: {sample.last_watched_at}")
-                logger.info("-" * 40)
-        
-        return True
-    
-    except Exception as e:
-        logger.error(f"Error checking watched_videos table: {str(e)}")
-        return False
-    finally:
-        db.close()
-
-def insert_test_data():
-    """Insert some test records into the watched_videos table."""
-    try:
-        db = SessionLocal()
-        
-        # Get some existing users and videos
-        users = db.query(User).limit(2).all()
-        videos = db.query(Video).limit(3).all()
-        
-        if not users or not videos:
-            logger.warning("No users or videos found in the database. Cannot insert test data.")
+        if "watched_videos" not in tables:
+            logger.error("watched_videos table does not exist!")
             return False
         
-        # Create some test watched videos records
-        test_records = []
-        for i, user in enumerate(users):
-            for j, video in enumerate(videos):
-                # Create different watch patterns
-                watch_record = WatchedVideo(
-                    user_id=user.user_id,
-                    video_id=video.video_id,
-                    like_flag=True if i % 2 == 0 else False,
-                    dislike_flag=True if i % 2 == 1 else False,
-                    saved_flag=True if j % 2 == 0 else False,
-                    shared_flag=True if (i+j) % 3 == 0 else False,
-                    watch_time=float(video.duration * (0.25 + (i+j) * 0.25)),  # Watch 25%, 50%, 75% or 100%
-                    watch_percentage=25.0 + (i+j) * 25.0,
-                    completed=True if (i+j) >= 3 else False,
-                    last_position=float(video.duration * (0.25 + (i+j) * 0.25)),
-                    first_watched_at=datetime.utcnow() - timedelta(days=(i+j)),
-                    last_watched_at=datetime.utcnow() - timedelta(hours=(i+j)),
-                    watch_count=i+j+1,
-                    device_type="mobile" if i % 2 == 0 else "desktop"
-                )
-                test_records.append(watch_record)
+        # Check if there are records in the table
+        count = db.query(WatchHistory).count()
+        logger.info(f"Found {count} records in watched_videos table")
         
-        # Add the records to the database
-        db.add_all(test_records)
-        db.commit()
+        # Show some sample records if they exist
+        if count > 0:
+            samples = db.query(WatchHistory).limit(5).all()
+            logger.info("Sample records:")
+            for sample in samples:
+                logger.info(f"  - {sample}")
         
-        logger.info(f"Successfully inserted {len(test_records)} test records into watched_videos table.")
+        # If no records exist, create a test record
+        if count == 0:
+            logger.info("Creating a test record...")
+            
+            # Get a user and a video
+            user = db.query(User).first()
+            video = db.query(Video).first()
+            
+            if not user:
+                logger.error("No users found in the database!")
+                return False
+                
+            if not video:
+                logger.error("No videos found in the database!")
+                return False
+            
+            # Create a watch record
+            watch_record = WatchHistory(
+                user_id=user.user_id,
+                video_id=video.video_id,
+                watch_time=120.0,
+                watch_percentage=75.0,
+                completed=False,
+                last_position=120.0,
+                watch_count=1,
+                device_type="test_device"
+            )
+            
+            db.add(watch_record)
+            db.commit()
+            
+            logger.info(f"Test record created: {watch_record}")
+            
         return True
-    
     except Exception as e:
-        db.rollback()
-        logger.error(f"Error inserting test data: {str(e)}")
+        logger.error(f"Error checking watched_videos table: {e}")
         return False
     finally:
         db.close()
 
 if __name__ == "__main__":
-    # First check if the table exists
-    if check_watched_videos_table():
-        # Ask if the user wants to insert test data
-        response = input("Do you want to insert test data? (y/n): ")
-        if response.lower() == 'y':
-            insert_test_data()
-            # Check table again after inserting data
-            check_watched_videos_table() 
+    check_watched_videos_table() 
