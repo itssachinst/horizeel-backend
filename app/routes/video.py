@@ -10,10 +10,12 @@ from app.crud import (
 from app.utils.s3_utils import upload_to_s3
 from app.schemas import VideoCreate, VideoResponse
 from app.utils.auth import get_current_user
-from app.models import User
+from app.models import User, Video, WatchedVideo
 from typing import List, Optional
 from uuid import UUID
 from pydantic import BaseModel, Field, validator
+from sqlalchemy.orm.exc import NoResultFound
+from datetime import datetime
 
 router = APIRouter(tags=["videos"])
 
@@ -318,3 +320,213 @@ def search_videos_route(
     
     videos = search_videos(db, query=q, skip=skip, limit=limit, search_type=type)
     return videos
+
+# Add this schema at an appropriate location
+class WatchHistoryCreate(BaseModel):
+    video_id: UUID
+    watch_time: float
+    watch_percentage: float = 0.0
+    completed: bool = False
+    last_position: float = 0.0
+    like_flag: bool = False
+    dislike_flag: bool = False
+    saved_flag: bool = False
+    shared_flag: bool = False
+    device_type: Optional[str] = None
+
+class WatchHistoryResponse(BaseModel):
+    id: UUID
+    video_id: UUID
+    user_id: UUID
+    watch_time: float
+    watch_percentage: float
+    completed: bool
+    last_position: float
+    like_flag: bool
+    dislike_flag: bool
+    saved_flag: bool
+    shared_flag: bool
+    watch_count: int
+    first_watched_at: datetime
+    last_watched_at: datetime
+    device_type: Optional[str]
+
+# Add these endpoints
+@router.post("/videos/watch-history", response_model=WatchHistoryResponse)
+async def update_watch_history(
+    watch_data: WatchHistoryCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update a user's watch history for a video.
+    If no record exists for this user-video pair, a new one is created.
+    """
+    try:
+        # Check if the video exists
+        video = db.query(Video).filter(Video.video_id == watch_data.video_id).first()
+        if not video:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Video with ID {watch_data.video_id} not found"
+            )
+        
+        # Try to get existing watch record
+        watch_record = db.query(WatchedVideo).filter(
+            WatchedVideo.user_id == current_user.user_id,
+            WatchedVideo.video_id == watch_data.video_id
+        ).first()
+        
+        # If no record exists, create a new one
+        if not watch_record:
+            watch_record = WatchedVideo(
+                user_id=current_user.user_id,
+                video_id=watch_data.video_id,
+                watch_time=watch_data.watch_time,
+                watch_percentage=watch_data.watch_percentage,
+                completed=watch_data.completed,
+                last_position=watch_data.last_position,
+                like_flag=watch_data.like_flag,
+                dislike_flag=watch_data.dislike_flag,
+                saved_flag=watch_data.saved_flag,
+                shared_flag=watch_data.shared_flag,
+                device_type=watch_data.device_type,
+                watch_count=1
+            )
+            db.add(watch_record)
+        else:
+            # Update existing record with new data
+            # Only update watch time if new time is greater
+            if watch_data.watch_time > watch_record.watch_time:
+                watch_record.watch_time = watch_data.watch_time
+            
+            # Only update percentage if new percentage is greater
+            if watch_data.watch_percentage > watch_record.watch_percentage:
+                watch_record.watch_percentage = watch_data.watch_percentage
+            
+            # Update completion status if completed
+            if watch_data.completed and not watch_record.completed:
+                watch_record.completed = True
+            
+            # Always update last position to most recent value
+            watch_record.last_position = watch_data.last_position
+            
+            # Update engagement flags
+            watch_record.like_flag = watch_data.like_flag
+            watch_record.dislike_flag = watch_data.dislike_flag
+            watch_record.saved_flag = watch_data.saved_flag
+            watch_record.shared_flag = watch_data.shared_flag
+            
+            # Update device type if provided
+            if watch_data.device_type:
+                watch_record.device_type = watch_data.device_type
+            
+            # Increment watch count
+            watch_record.watch_count += 1
+            
+            # last_watched_at will be updated automatically by the ORM due to onupdate=func.now()
+        
+        db.commit()
+        db.refresh(watch_record)
+        
+        return watch_record
+    
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update watch history: {str(e)}"
+        )
+
+@router.get("/videos/watch-history", response_model=List[WatchHistoryResponse])
+async def get_watch_history(
+    limit: int = 50,
+    skip: int = 0,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get a user's watch history.
+    Returns the most recently watched videos first.
+    """
+    try:
+        history = db.query(WatchedVideo).filter(
+            WatchedVideo.user_id == current_user.user_id
+        ).order_by(
+            WatchedVideo.last_watched_at.desc()
+        ).offset(skip).limit(limit).all()
+        
+        return history
+    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve watch history: {str(e)}"
+        )
+
+@router.get("/videos/{video_id}/watch-stats", response_model=WatchHistoryResponse)
+async def get_video_watch_stats(
+    video_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get a user's watch statistics for a specific video.
+    """
+    try:
+        watch_record = db.query(WatchedVideo).filter(
+            WatchedVideo.user_id == current_user.user_id,
+            WatchedVideo.video_id == video_id
+        ).first()
+        
+        if not watch_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No watch history found for video with ID {video_id}"
+            )
+        
+        return watch_record
+    
+    except NoResultFound:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No watch history found for video with ID {video_id}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve watch statistics: {str(e)}"
+        )
+
+@router.delete("/videos/watch-history/{video_id}")
+async def delete_watch_history(
+    video_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Delete a user's watch history for a specific video.
+    """
+    try:
+        watch_record = db.query(WatchedVideo).filter(
+            WatchedVideo.user_id == current_user.user_id,
+            WatchedVideo.video_id == video_id
+        ).first()
+        
+        if not watch_record:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No watch history found for video with ID {video_id}"
+            )
+        
+        db.delete(watch_record)
+        db.commit()
+        
+        return {"message": f"Watch history for video with ID {video_id} deleted successfully"}
+    
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete watch history: {str(e)}"
+        )

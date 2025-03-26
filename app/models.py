@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, TIMESTAMP, UUID, BIGINT, Integer, Text, Enum, ForeignKey, Index, Boolean, DateTime, JSON
+from sqlalchemy import Column, String, TIMESTAMP, UUID, BIGINT, Integer, Text, Enum, ForeignKey, Index, Boolean, DateTime, JSON, Float
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, ENUM
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -121,4 +121,48 @@ class UserFollow(Base):
         Index('ix_user_follows_follower_id', follower_id),  # For finding who a user follows
         Index('ix_user_follows_followed_id', followed_id),  # For finding a user's followers
         Index('ix_user_follows_follower_followed', follower_id, followed_id, unique=True),  # Ensure unique follow relationship
+    )
+
+
+class WatchedVideo(Base):
+    """Model to track user video view history and engagement metrics"""
+    __tablename__ = "watched_videos"
+    
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(PGUUID(as_uuid=True), ForeignKey("users.user_id"), nullable=False)
+    video_id = Column(PGUUID(as_uuid=True), ForeignKey("videos.video_id"), nullable=False)
+    
+    # Engagement flags
+    like_flag = Column(Boolean, default=False)
+    dislike_flag = Column(Boolean, default=False)
+    saved_flag = Column(Boolean, default=False)
+    shared_flag = Column(Boolean, default=False)
+    
+    # Watch metrics
+    watch_time = Column(Float, default=0.0)  # Time in seconds
+    watch_percentage = Column(Float, default=0.0)  # Percentage of video watched (0-100)
+    completed = Column(Boolean, default=False)  # Whether the user watched to the end
+    last_position = Column(Float, default=0.0)  # Last position in the video in seconds
+    
+    # History
+    first_watched_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    last_watched_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
+    watch_count = Column(Integer, default=1)  # Number of times the user watched this video
+    
+    # Device info
+    device_type = Column(String(50), nullable=True)  # mobile, desktop, tablet, etc.
+    
+    # Relationships
+    user = relationship("User", backref="watched_videos")
+    video = relationship("Video")
+    
+    def __repr__(self):
+        return f"WatchedVideo(id={self.id}, user_id={self.user_id}, video_id={self.video_id}, watch_time={self.watch_time}s)"
+    
+    # Add indexes for common query patterns
+    __table_args__ = (
+        Index('ix_watched_videos_user_id', user_id),  # For querying watched videos by user
+        Index('ix_watched_videos_video_id', video_id),  # For analytics on video popularity
+        Index('ix_watched_videos_user_video', user_id, video_id, unique=True),  # Ensure one record per user-video pair
+        Index('ix_watched_videos_last_watched_at', last_watched_at.desc()),  # For sorting by recently watched
     )
