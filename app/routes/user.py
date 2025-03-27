@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from app import crud, schemas
 from app.crud import ACCESS_TOKEN_EXPIRE_MINUTES, ALGORITHM, SECRET_KEY, update_user_feedback, get_all_user_feedback
-from app.utils.auth import get_current_user, get_db, is_admin
+from app.utils.auth import get_current_user, get_db
 from app.utils.s3_utils import upload_profile_image_to_s3
 import logging
 
@@ -355,13 +355,12 @@ async def get_all_feedback(
     skip: int = 0,
     limit: int = 100,
     current_user: schemas.UserResponse = Depends(get_current_user),
-    is_admin_user: bool = Depends(is_admin),
     db: Session = Depends(get_db)
 ):
     """
-    Get all user feedback (admin only)
+    Get all user feedback
     
-    This endpoint allows administrators to retrieve all user feedback.
+    This endpoint allows users to retrieve all user feedback.
     
     - **skip**: Number of records to skip (pagination)
     - **limit**: Maximum number of records to return (pagination)
@@ -370,7 +369,6 @@ async def get_all_feedback(
         List of user objects with feedback
     """
     try:
-        # The is_admin dependency will raise an exception if user is not an admin
         users_with_feedback = get_all_user_feedback(db, skip=skip, limit=limit)
         return users_with_feedback
     except Exception as e:

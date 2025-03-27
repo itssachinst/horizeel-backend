@@ -1,8 +1,7 @@
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
 from app.routes.video import router as video_router
 from app.routes.user import router as user_router
@@ -10,8 +9,6 @@ from app.routes.auth import router as auth_router
 import logging
 import time
 from contextlib import asynccontextmanager
-from starlette.datastructures import URL
-from starlette.types import ASGIApp, Receive, Scope, Send
 import os
 
 # Configure logging
@@ -20,46 +17,6 @@ logger = logging.getLogger(__name__)
 
 # Environment check for enabling HTTPS middleware
 ENABLE_HTTPS_REDIRECT = os.environ.get("ENABLE_HTTPS_REDIRECT", "true").lower() == "true"
-
-# Custom middleware to handle CloudFront/Load balancer HTTPS forwarding
-class ProxyHeadersMiddleware:
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        headers = dict(scope["headers"])
-        
-        # Check for X-Forwarded-Proto header from CloudFront/Load Balancer
-        forwarded_proto = headers.get(b"x-forwarded-proto", b"").decode("latin1")
-        
-        # Log the headers for debugging
-        logger.debug(f"Request headers: {headers}")
-        
-        if forwarded_proto == "https":
-            # Already HTTPS, no need to redirect
-            await self.app(scope, receive, send)
-        else:
-            # Convert to HTTPS URL for redirect
-            url = URL(scope=scope)
-            https_url = url.replace(scheme="https")
-            
-            # Send a 307 redirect response
-            headers = [(b"location", https_url.encode())]
-            status_code = 307
-            
-            await send({
-                "type": "http.response.start",
-                "status": status_code,
-                "headers": headers,
-            })
-            await send({
-                "type": "http.response.body",
-                "body": b"",
-            })
 
 # Startup and shutdown events
 @asynccontextmanager
@@ -83,10 +40,6 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CloudFront/Load Balancer proxy headers middleware (before CORS)
-if ENABLE_HTTPS_REDIRECT:
-    app.add_middleware(ProxyHeadersMiddleware)
-
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -99,6 +52,35 @@ app.add_middleware(
 
 # Add GZip compression for responses
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+# Manual HTTPS redirect middleware - even simpler approach, only redirect specific endpoints
+@app.middleware("http")
+async def redirect_to_https(request: Request, call_next):
+    # Skip HTTPS redirect if it's disabled
+    if not ENABLE_HTTPS_REDIRECT:
+        return await call_next(request)
+        
+    # Check for X-Forwarded-Proto header (from CloudFront/load balancer)
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    host = request.headers.get("host", "")
+    
+    # Only redirect if:
+    # 1. It's not already HTTPS
+    # 2. It's not a local request (localhost)
+    # 3. It's not a direct server health check
+    if (forwarded_proto != "https" and request.url.scheme != "https" and
+        "localhost" not in host and "127.0.0.1" not in host and
+        not request.url.path.endswith("/health")):
+        
+        # Only redirect API endpoints for browser requests
+        if "/api/" in request.url.path and "Mozilla" in request.headers.get("user-agent", ""):
+            # Build HTTPS URL for redirect
+            https_url = str(request.url).replace("http://", "https://")
+            logger.info(f"Redirecting browser to HTTPS: {https_url}")
+            return RedirectResponse(https_url, status_code=301)  # 301 is more cache-friendly than 307
+    
+    # For all other cases, just proceed normally
+    return await call_next(request)
 
 # Request timing middleware
 @app.middleware("http")

@@ -40,19 +40,19 @@ class User(Base):
     """User model for database storage"""
     __tablename__ = "users"
 
-    user_id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    password_hash = Column(String)
+    user_id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    username = Column(String, nullable=False, unique=True)
+    email = Column(String, nullable=False, unique=True)
+    password_hash = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
-    is_admin = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # is_admin = Column(Boolean, default=False)  # Commented out as column doesn't exist in DB
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())
     bio = Column(String, nullable=True)
-    profile_picture = Column(String, nullable=True)
-    social = Column(JSON, nullable=True)
-    feedback = Column(Text, nullable=True)
-    feedback_updated_at = Column(DateTime, nullable=True)
+    profile_picture = Column(String, nullable=True)  # URL to profile picture
+    social = Column(JSON, default=lambda: {})  # Social media links
+    feedback = Column(Text, nullable=True)  # User feedback
+    feedback_updated_at = Column(TIMESTAMP(timezone=True), nullable=True)  # Feedback timestamp
     
     # Relationship
     videos = relationship("Video", back_populates="uploader", cascade="all, delete-orphan")
@@ -182,7 +182,7 @@ class Like(Base):
     
     # Relationships
     user = relationship("User", backref="likes")
-    video = relationship("Video", backref="likes")
+    video = relationship("Video", backref="video_likes")
     
     def __repr__(self):
         return f"Like(id={self.id}, user_id={self.user_id}, video_id={self.video_id})"

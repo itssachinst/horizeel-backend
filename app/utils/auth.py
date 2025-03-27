@@ -103,25 +103,25 @@ async def get_current_user_optional(token: Optional[str] = Depends(oauth2_scheme
     return user 
 
 # Check if user is an admin
-async def is_admin(current_user = Depends(get_current_user)):
-    """
-    Dependency to check if the current user is an admin.
-    This should be used with FastAPI's Depends() to protect admin-only routes.
-    
-    Raises:
-        HTTPException: If user is not an admin
-    
-    Returns:
-        bool: True if the user is an admin
-    """
-    # Replace this with your actual admin check logic
-    # For example, you might check a user role field or specific user IDs
-    is_admin_user = getattr(current_user, "is_admin", False)
-    
-    if not is_admin_user:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized. Admin privileges required."
-        )
-    
-    return True 
+# async def is_admin(current_user = Depends(get_current_user)):
+#     """
+#     Dependency to check if the current user is an admin.
+#     This should be used with FastAPI's Depends() to protect admin-only routes.
+#     
+#     Raises:
+#         HTTPException: If user is not an admin
+#     
+#     Returns:
+#         bool: True if the user is an admin
+#     """
+#     # Replace this with your actual admin check logic
+#     # For example, you might check a user role field or specific user IDs
+#     is_admin_user = getattr(current_user, "is_admin", False)
+#     
+#     if not is_admin_user:
+#         raise HTTPException(
+#             status_code=status.HTTP_403_FORBIDDEN,
+#             detail="Not authorized. Admin privileges required."
+#         )
+#     
+#     return True 

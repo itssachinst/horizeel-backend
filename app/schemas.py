@@ -46,20 +46,19 @@ class UserUpdate(BaseModel):
     profile_picture: Optional[str] = None
     cover_image: Optional[str] = None
 
-class UserResponse(UserBase):
+class UserResponse(BaseModel):
     user_id: UUID
+    username: str
+    email: str
+    is_active: bool
     created_at: datetime
     updated_at: datetime
     bio: Optional[str] = None
     profile_picture: Optional[str] = None
-    is_active: bool = True
-    is_admin: bool = False
     social: Optional[Dict[str, str]] = None
     feedback: Optional[str] = None
     feedback_updated_at: Optional[datetime] = None
-    followers_count: Optional[int] = 0
-    following_count: Optional[int] = 0
-
+    
     class Config:
         orm_mode = True
         
