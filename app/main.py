@@ -34,9 +34,9 @@ app = FastAPI(
     version="1.0.0",
     # Disable OpenAPI docs in production for better performance
     # Set to True only in development
-    openapi_url="/api/openapi.json" if __debug__ else None,
-    docs_url="/api/docs" if __debug__ else None,
-    redoc_url="/api/redoc" if __debug__ else None,
+    openapi_url="/api/openapi.json" ,
+    docs_url="/api/docs" ,
+    redoc_url="/api/redoc" ,
     lifespan=lifespan
 )
 

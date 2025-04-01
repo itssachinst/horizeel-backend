@@ -8,24 +8,31 @@ class VideoCreate(BaseModel):
     description: str
 
 class VideoResponse(VideoCreate):
-    video_id: str  # Define it as a string
+    video_id: UUID
     video_url: str
-    created_at: datetime
+    thumbnail_url: str
+    title: str
+    description: str
+    user_id: UUID
+    username: str
     views: int
     likes: int
-    dislikes: int
-    thumbnail_url: str
-    user_id: Optional[str] = None
-    username: Optional[str] = None
+    created_at: datetime
+    is_liked: bool = False
 
-    @validator("video_id", "user_id", pre=True)  # ✅ Convert UUID to string before validation
-    def convert_uuid(cls, value):
-        if isinstance(value, UUID):
-            return str(value)
-        return value
+    @validator('video_url', 'thumbnail_url')
+    def format_url(cls, v):
+        if not v:
+            return v
+        if v.startswith(('http://', 'https://')):
+            return v
+        # Remove any leading slash to avoid double slashes
+        clean_url = v[1:] if v.startswith('/') else v
+        return f"http://localhost:8000/api/{clean_url}"
 
-    class Config:
-        orm_mode = True  # Allows working with SQLAlchemy ORM objects
+    @validator('video_id', 'user_id')
+    def convert_uuid(cls, v):
+        return str(v)
 
 # User schemas
 class UserBase(BaseModel):

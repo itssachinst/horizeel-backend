@@ -81,78 +81,96 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20, user_id: str = None
         List of Video objects
     """
     try:
-        if user_id:
-            # Fetch user's watch history & liked videos in a single query
-            watched_video_ids = set()
-            liked_video_ids = set()
-            
-            # Get watch history and liked videos in parallel
-            watch_history = db.query(WatchHistory.video_id).filter_by(user_id=user_id).all()
-            liked_videos = db.query(Like.video_id).filter_by(user_id=user_id).all()
-            
-            watched_video_ids = {video.video_id for video in watch_history}
-            liked_video_ids = {video.video_id for video in liked_videos}
-            
-            # Get followed users
-            followed_users = [
-                follow.followed_id for follow in db.query(UserFollow).filter_by(follower_id=user_id).all()
-            ]
-            
-            # Get videos from different sources with optimized queries
-            trending_videos = db.query(Video).order_by(
-                Video.views.desc(), 
-                Video.likes.desc()
-            ).limit(limit * 2).all()
-            
-            followed_videos = []
-            if followed_users:
-                followed_videos = db.query(Video).filter(
-                    Video.user_id.in_(followed_users)
-                ).order_by(
-                    Video.created_at.desc()
-                ).limit(limit).all()
-
-            # Get new videos (not watched yet)
-            new_videos = []
-            if watched_video_ids:
-                new_videos = db.query(Video).filter(
-                    not_(Video.video_id.in_(watched_video_ids))
-                ).order_by(
-                    Video.created_at.desc()
-                ).limit(limit).all()
-
-            # Merge results, ensuring diversity
-            video_list = []
-            video_set = set()  # To track unique videos
-            
-            # Add videos in order of priority
-            for video in trending_videos:
-                if video.video_id not in video_set:
-                    video_list.append(video)
-                    video_set.add(video.video_id)
-                    
-            for video in followed_videos:
-                if video.video_id not in video_set:
-                    video_list.append(video)
-                    video_set.add(video.video_id)
-                    
-            for video in new_videos:
-                if video.video_id not in video_set:
-                    video_list.append(video)
-                    video_set.add(video.video_id)
-            
-            # Shuffle to avoid monotony
-            random.shuffle(video_list)
-            
-            # Apply pagination
-            videos = video_list[skip: skip + limit]
-        else:
-            # If no user_id provided, return regular trending videos
+        # If no user_id provided, return regular trending videos
+        if not user_id:
             videos = db.query(Video).order_by(
                 Video.views.desc(), 
                 Video.likes.desc(), 
                 Video.created_at.desc()
             ).offset(skip).limit(limit).all()
+            
+            # Get all user IDs for videos in one query to minimize database calls
+            user_ids = [video.user_id for video in videos if video.user_id]
+            
+            if user_ids:
+                # Get all users in a single query
+                users = {
+                    str(user.user_id): user 
+                    for user in db.query(User).filter(User.user_id.in_(user_ids)).all()
+                }
+                
+                # Add username to videos
+                for video in videos:
+                    if video.user_id and str(video.user_id) in users:
+                        video.username = users[str(video.user_id)].username
+            
+            return videos
+
+        # For authenticated users, provide personalized recommendations
+        # Fetch user's watch history & liked videos in a single query
+        watched_video_ids = set()
+        liked_video_ids = set()
+        
+        # Get watch history and liked videos in parallel
+        watch_history = db.query(WatchHistory.video_id).filter_by(user_id=user_id).all()
+        liked_videos = db.query(Like.video_id).filter_by(user_id=user_id).all()
+        
+        watched_video_ids = {video.video_id for video in watch_history}
+        liked_video_ids = {video.video_id for video in liked_videos}
+        
+        # Get followed users
+        followed_users = [
+            follow.followed_id for follow in db.query(UserFollow).filter_by(follower_id=user_id).all()
+        ]
+        
+        # Get videos from different sources with optimized queries
+        trending_videos = db.query(Video).order_by(
+            Video.views.desc(), 
+            Video.likes.desc()
+        ).limit(limit * 2).all()
+        
+        followed_videos = []
+        if followed_users:
+            followed_videos = db.query(Video).filter(
+                Video.user_id.in_(followed_users)
+            ).order_by(
+                Video.created_at.desc()
+            ).limit(limit).all()
+
+        # Get new videos (not watched yet)
+        new_videos = []
+        if watched_video_ids:
+            new_videos = db.query(Video).filter(
+                not_(Video.video_id.in_(watched_video_ids))
+            ).order_by(
+                Video.created_at.desc()
+            ).limit(limit).all()
+
+        # Merge results, ensuring diversity
+        video_list = []
+        video_set = set()  # To track unique videos
+        
+        # Add videos in order of priority
+        for video in trending_videos:
+            if video.video_id not in video_set:
+                video_list.append(video)
+                video_set.add(video.video_id)
+                
+        for video in followed_videos:
+            if video.video_id not in video_set:
+                video_list.append(video)
+                video_set.add(video.video_id)
+                
+        for video in new_videos:
+            if video.video_id not in video_set:
+                video_list.append(video)
+                video_set.add(video.video_id)
+        
+        # Shuffle to avoid monotony
+        random.shuffle(video_list)
+        
+        # Apply pagination
+        videos = video_list[skip: skip + limit]
         
         # Get all user IDs for videos in one query to minimize database calls
         user_ids = [video.user_id for video in videos if video.user_id]

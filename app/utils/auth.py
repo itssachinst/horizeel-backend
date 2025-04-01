@@ -16,7 +16,7 @@ SECRET_KEY = "your-secret-key-keep-it-secret"  # Match the key in crud.py
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
 # Database dependency
 def get_db():
@@ -100,7 +100,7 @@ async def get_current_user_optional(token: Optional[str] = Depends(oauth2_scheme
         return None
 
     user = crud.get_user_by_id(db, user_id=token_data.user_id)
-    return user 
+    return user
 
 # Check if user is an admin
 # async def is_admin(current_user = Depends(get_current_user)):
