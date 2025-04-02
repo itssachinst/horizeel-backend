@@ -59,7 +59,7 @@ class UserResponse(BaseModel):
     email: str
     is_active: bool
     created_at: datetime
-    updated_at: datetime
+    updated_at: Optional[datetime] = None
     bio: Optional[str] = None
     profile_picture: Optional[str] = None
     social: Optional[Dict[str, str]] = None

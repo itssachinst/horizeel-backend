@@ -387,11 +387,14 @@ def get_users(db: Session, skip: int = 0, limit: int = 20):
 def create_user(db: Session, user: UserCreate):
     """Create a new user."""
     hashed_password = pwd_context.hash(user.password)
+    current_time = datetime.utcnow()
     db_user = User(
         user_id=uuid4(),
         username=user.username,
         email=user.email,
-        password_hash=hashed_password
+        password_hash=hashed_password,
+        created_at=current_time,
+        updated_at=current_time
     )
     db.add(db_user)
     db.commit()
