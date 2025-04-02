@@ -193,3 +193,20 @@ class Like(Base):
         Index('ix_likes_video_id', video_id),  # For counting likes per video
         Index('ix_likes_user_video', user_id, video_id, unique=True),  # Ensure a user can like a video only once
     )
+
+
+class WaitingList(Base):
+    """Model to store waiting list emails"""
+    __tablename__ = "waiting_list"
+    
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String, nullable=False, unique=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    
+    def __repr__(self):
+        return f"WaitingList(id={self.id}, email={self.email})"
+    
+    # Add index for email lookups
+    __table_args__ = (
+        Index('ix_waiting_list_email', email, unique=True),
+    )

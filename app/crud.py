@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from app.models import Video, User, SavedVideo, UserFollow, WatchHistory, Like
+from app.models import Video, User, SavedVideo, UserFollow, WatchHistory, Like, WaitingList
 from app.schemas import VideoCreate, UserCreate, UserUpdate
 from sqlalchemy import or_, func, and_, not_
 from uuid import uuid4
@@ -795,4 +795,55 @@ def get_all_user_feedback(db: Session, skip: int = 0, limit: int = 100):
         return users_with_feedback
     except Exception as e:
         logger.error(f"Failed to get user feedback: {str(e)}")
+        raise
+
+# Waiting List functions
+def add_to_waiting_list(db: Session, email: str):
+    """
+    Add an email to the waiting list
+    
+    Args:
+        db: Database session
+        email: Email to add to the waiting list
+        
+    Returns:
+        WaitingList: Created waiting list entry or existing entry if email already exists
+    """
+    try:
+        # Check if email already exists in the waiting list
+        existing = db.query(WaitingList).filter(WaitingList.email == email).first()
+        if existing:
+            return existing
+            
+        # Create new waiting list entry
+        waiting_list_entry = WaitingList(
+            id=uuid4(),
+            email=email
+        )
+        
+        db.add(waiting_list_entry)
+        db.commit()
+        db.refresh(waiting_list_entry)
+        return waiting_list_entry
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to add email {email} to waiting list: {str(e)}")
+        raise
+
+def get_waiting_list(db: Session, skip: int = 0, limit: int = 100):
+    """
+    Get all waiting list entries with pagination
+    
+    Args:
+        db: Database session
+        skip: Number of records to skip (pagination)
+        limit: Maximum number of records to return (pagination)
+        
+    Returns:
+        List of WaitingList objects
+    """
+    try:
+        return db.query(WaitingList).order_by(WaitingList.created_at.desc()).offset(skip).limit(limit).all()
+    except Exception as e:
+        logger.error(f"Failed to get waiting list: {str(e)}")
         raise

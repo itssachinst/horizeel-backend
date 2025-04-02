@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from app.routes.video import router as video_router
 from app.routes.user import router as user_router
 from app.routes.auth import router as auth_router
+from app.routes.waiting_list import router as waiting_list_router
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -123,6 +124,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 app.include_router(video_router, prefix="/api")
 app.include_router(user_router, prefix="/api/users")
 app.include_router(auth_router, prefix="/api/auth")
+app.include_router(waiting_list_router, prefix="/api/waiting-list")
 
 @app.get("/api/health")
 async def health_check():

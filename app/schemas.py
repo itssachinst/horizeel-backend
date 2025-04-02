@@ -134,3 +134,29 @@ class UserFeedback(BaseModel):
                 "feedback": "I love this app! It's very intuitive and fun to use."
             }
         }
+
+class WaitingListCreate(BaseModel):
+    """Schema for adding email to waiting list"""
+    email: EmailStr
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "email": "user@example.com"
+            }
+        }
+
+class WaitingListResponse(BaseModel):
+    """Schema for waiting list response"""
+    id: UUID
+    email: EmailStr
+    created_at: datetime
+    
+    @validator("id", pre=True)
+    def convert_uuid(cls, value):
+        if isinstance(value, UUID):
+            return str(value)
+        return value
+    
+    class Config:
+        orm_mode = True
