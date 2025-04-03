@@ -6,8 +6,8 @@ from fastapi import UploadFile, HTTPException
 
 logger = logging.getLogger(__name__)
 
-AWS_ACCESS_KEY = ""
-AWS_SECRET_KEY = ""
+AWS_ACCESS_KEY = "AKIA3RYC52TM7MKGCFUU"
+AWS_SECRET_KEY = "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"
 S3_BUCKET = "mypov-videos"
 
 s3_client = boto3.client(
