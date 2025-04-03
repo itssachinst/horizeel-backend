@@ -38,6 +38,17 @@ def create_video(db: Session, video: VideoCreate, vfile_url: str, tfile_url: str
         db.add(db_video)
         db.commit()
         db.refresh(db_video)
+        
+        # Add username to the video object
+        if user_id:
+            user = db.query(User).filter(User.user_id == user_id).first()
+            if user:
+                db_video.username = user.username
+            else:
+                db_video.username = "Unknown"
+        else:
+            db_video.username = "Unknown"
+        
         return db_video
     except Exception as e:
         db.rollback()
@@ -53,11 +64,16 @@ def get_video(db: Session, video_id: Union[str, uuid4]):
         # Query the video
         video = db.query(Video).filter(Video.video_id == video_id).first()
         
-        # If video exists and has a user_id, get the username
-        if video and video.user_id:
-            user = db.query(User).filter(User.user_id == video.user_id).first()
-            if user:
-                video.username = user.username
+        # If video exists
+        if video:
+            # Initialize username field with default value
+            video.username = "Unknown"
+            
+            # Try to get the actual username if user_id exists
+            if video.user_id:
+                user = db.query(User).filter(User.user_id == video.user_id).first()
+                if user:
+                    video.username = user.username
         
         return video
     except Exception as e:
@@ -101,8 +117,15 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20, user_id: str = None
                 
                 # Add username to videos
                 for video in videos:
+                    # Initialize with default username
+                    video.username = "Unknown"
+                    # Try to get the actual username if possible
                     if video.user_id and str(video.user_id) in users:
                         video.username = users[str(video.user_id)].username
+            else:
+                # Set default username if no users were found
+                for video in videos:
+                    video.username = "Unknown"
             
             return videos
 
@@ -184,8 +207,15 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20, user_id: str = None
             
             # Add username to videos
             for video in videos:
+                # Initialize with default username
+                video.username = "Unknown"
+                # Try to get the actual username if possible
                 if video.user_id and str(video.user_id) in users:
                     video.username = users[str(video.user_id)].username
+        else:
+            # Set default username if no users were found
+            for video in videos:
+                video.username = "Unknown"
         
         return videos
     except Exception as e:
