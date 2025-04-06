@@ -15,6 +15,7 @@ class VideoResponse(VideoCreate):
     description: str
     user_id: UUID
     username: str
+    profile_picture: Optional[str] = None
     views: int
     likes: int
     created_at: datetime
@@ -30,9 +31,14 @@ class VideoResponse(VideoCreate):
         clean_url = v[1:] if v.startswith('/') else v
         return f"http://localhost:8000/api/{clean_url}"
 
-    @validator('video_id', 'user_id')
+    @validator('video_id', 'user_id', pre=True)
     def convert_uuid(cls, v):
-        return str(v)
+        if isinstance(v, str):
+            try:
+                return UUID(v)
+            except ValueError:
+                return v
+        return v
 
 # User schemas
 class UserBase(BaseModel):

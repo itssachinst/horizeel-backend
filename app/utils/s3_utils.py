@@ -3,6 +3,10 @@ import os
 from botocore.exceptions import ClientError
 import logging
 from fastapi import UploadFile, HTTPException
+import subprocess
+import tempfile
+import shutil
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -20,14 +24,88 @@ s3_client = boto3.client(
 PROFILE_IMAGES_FOLDER = 'profile-images/'
 VIDEOS_FOLDER = 'videos/'
 THUMBNAILS_FOLDER = 'thumbnails/'
+HLS_FOLDER = 'hls/'
 
 def upload_to_s3(file_path: str, file_name: str) -> str:
     if not S3_BUCKET:
         raise ValueError("S3_BUCKET is not defined. Check your environment variables.")
-    print(f"https://{S3_BUCKET}.s3.eu-north-1.amazonaws.com/{file_name}")
+    logger.info(f"Uploading file to S3: {file_name}")
     s3_client.upload_file(file_path, S3_BUCKET, file_name, ExtraArgs={"ContentType": "video/mp4"})
     
     return f"https://{S3_BUCKET}.s3.eu-north-1.amazonaws.com/{file_name}"
+
+def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
+    """
+    Convert a video file to HLS format and upload to S3
+    
+    Args:
+        input_path: Path to the input video file
+        filename: Original filename (without path)
+        
+    Returns:
+        URL to the HLS playlist
+    """
+    # Create a unique ID for this video
+    video_id = str(uuid.uuid4())
+    
+    # Create temporary directory for HLS output
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Extract base name without extension
+        base_name = os.path.splitext(filename)[0]
+        
+        # Create output directory for HLS files
+        output_path = os.path.join(temp_dir, base_name)
+        os.makedirs(output_path, exist_ok=True)
+        
+        # Path to the HLS playlist
+        hls_playlist = os.path.join(output_path, "index.m3u8")
+        
+        # Run FFmpeg to convert to HLS
+        ffmpeg_cmd = [
+            'ffmpeg', '-y',
+            '-i', input_path,
+            '-profile:v', 'baseline',
+            '-level', '3.0',
+            '-start_number', '0',
+            '-hls_time', '10',
+            '-hls_list_size', '0',
+            '-f', 'hls',
+            hls_playlist
+        ]
+        
+        try:
+            subprocess.run(ffmpeg_cmd, check=True)
+            logger.info(f"Successfully converted {filename} to HLS format")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"FFmpeg conversion failed: {e}")
+            raise HTTPException(status_code=500, detail="Failed to convert video to HLS format")
+        
+        # S3 prefix for this video
+        s3_prefix = f"{HLS_FOLDER}{video_id}/"
+        
+        # Upload all HLS files to S3
+        for root, _, files in os.walk(output_path):
+            for file in files:
+                local_file_path = os.path.join(root, file)
+                s3_key = f"{s3_prefix}{file}"
+                
+                # Set appropriate content type
+                content_type = 'application/vnd.apple.mpegurl' if file.endswith('.m3u8') else 'video/MP2T'
+                
+                try:
+                    s3_client.upload_file(
+                        local_file_path, 
+                        S3_BUCKET, 
+                        s3_key,
+                        ExtraArgs={'ContentType': content_type}
+                    )
+                    logger.info(f"Uploaded {s3_key} to S3")
+                except ClientError as e:
+                    logger.error(f"Error uploading {s3_key} to S3: {e}")
+                    raise HTTPException(status_code=500, detail="Failed to upload HLS files to S3")
+        
+        # Return the URL to the HLS playlist
+        return f"https://{S3_BUCKET}.s3.eu-north-1.amazonaws.com/{s3_prefix}index.m3u8"
 
 async def upload_video_to_s3(file: UploadFile, video_id: str):
     """Upload a video file to S3"""

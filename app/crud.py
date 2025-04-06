@@ -2,7 +2,7 @@ from sqlalchemy.orm import Session
 from app.models import Video, User, SavedVideo, UserFollow, WatchHistory, Like, WaitingList
 from app.schemas import VideoCreate, UserCreate, UserUpdate
 from sqlalchemy import or_, func, and_, not_
-from uuid import uuid4
+from uuid import uuid4, UUID
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -27,27 +27,38 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 def create_video(db: Session, video: VideoCreate, vfile_url: str, tfile_url: str, user_id: str = None):
     """Create a new video entry in the database"""
     try:
+        # Convert user_id to UUID if it's a string
+        user_id_uuid = None
+        if user_id:
+            try:
+                user_id_uuid = UUID(user_id)
+            except ValueError:
+                logger.warning(f"Invalid UUID format for user_id: {user_id}")
+        
         db_video = Video(
             video_id=uuid4(),
             title=video["title"],
             description=video["description"],
             video_url=vfile_url,
             thumbnail_url=tfile_url,
-            user_id=user_id
+            user_id=user_id_uuid
         )
         db.add(db_video)
         db.commit()
         db.refresh(db_video)
         
-        # Add username to the video object
-        if user_id:
-            user = db.query(User).filter(User.user_id == user_id).first()
+        # Add username and profile_picture to the video object
+        if user_id_uuid:
+            user = db.query(User).filter(User.user_id == user_id_uuid).first()
             if user:
                 db_video.username = user.username
+                db_video.profile_picture = user.profile_picture
             else:
                 db_video.username = "Unknown"
+                db_video.profile_picture = None
         else:
             db_video.username = "Unknown"
+            db_video.profile_picture = None
         
         return db_video
     except Exception as e:
@@ -61,19 +72,30 @@ def get_video(db: Session, video_id: Union[str, uuid4]):
     If the video has a user_id, the username will be included.
     """
     try:
+        # Convert video_id to UUID if it's a string
+        video_id_uuid = video_id
+        if isinstance(video_id, str):
+            try:
+                video_id_uuid = UUID(video_id)
+            except ValueError:
+                logger.warning(f"Invalid UUID format for video_id: {video_id}")
+                return None
+        
         # Query the video
-        video = db.query(Video).filter(Video.video_id == video_id).first()
+        video = db.query(Video).filter(Video.video_id == video_id_uuid).first()
         
         # If video exists
         if video:
-            # Initialize username field with default value
+            # Initialize username and profile_picture fields with default values
             video.username = "Unknown"
+            video.profile_picture = None
             
-            # Try to get the actual username if user_id exists
+            # Try to get the actual username and profile_picture if user_id exists
             if video.user_id:
                 user = db.query(User).filter(User.user_id == video.user_id).first()
                 if user:
                     video.username = user.username
+                    video.profile_picture = user.profile_picture
         
         return video
     except Exception as e:
@@ -97,8 +119,16 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20, user_id: str = None
         List of Video objects
     """
     try:
+        # Convert user_id to UUID if it's a string
+        user_id_uuid = None
+        if user_id:
+            try:
+                user_id_uuid = UUID(user_id)
+            except ValueError:
+                logger.warning(f"Invalid UUID format for user_id: {user_id}")
+        
         # If no user_id provided, return regular trending videos
-        if not user_id:
+        if not user_id_uuid:
             videos = db.query(Video).order_by(
                 Video.views.desc(), 
                 Video.likes.desc(), 
@@ -115,17 +145,20 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20, user_id: str = None
                     for user in db.query(User).filter(User.user_id.in_(user_ids)).all()
                 }
                 
-                # Add username to videos
+                # Add username and profile_picture to videos
                 for video in videos:
-                    # Initialize with default username
+                    # Initialize with default values
                     video.username = "Unknown"
-                    # Try to get the actual username if possible
+                    video.profile_picture = None
+                    # Try to get the actual username and profile_picture if possible
                     if video.user_id and str(video.user_id) in users:
                         video.username = users[str(video.user_id)].username
+                        video.profile_picture = users[str(video.user_id)].profile_picture
             else:
-                # Set default username if no users were found
+                # Set default values if no users were found
                 for video in videos:
                     video.username = "Unknown"
+                    video.profile_picture = None
             
             return videos
 
@@ -135,15 +168,15 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20, user_id: str = None
         liked_video_ids = set()
         
         # Get watch history and liked videos in parallel
-        watch_history = db.query(WatchHistory.video_id).filter_by(user_id=user_id).all()
-        liked_videos = db.query(Like.video_id).filter_by(user_id=user_id).all()
+        watch_history = db.query(WatchHistory.video_id).filter_by(user_id=user_id_uuid).all()
+        liked_videos = db.query(Like.video_id).filter_by(user_id=user_id_uuid).all()
         
         watched_video_ids = {video.video_id for video in watch_history}
         liked_video_ids = {video.video_id for video in liked_videos}
         
         # Get followed users
         followed_users = [
-            follow.followed_id for follow in db.query(UserFollow).filter_by(follower_id=user_id).all()
+            follow.followed_id for follow in db.query(UserFollow).filter_by(follower_id=user_id_uuid).all()
         ]
         
         # Get videos from different sources with optimized queries
@@ -205,17 +238,20 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20, user_id: str = None
                 for user in db.query(User).filter(User.user_id.in_(user_ids)).all()
             }
             
-            # Add username to videos
+            # Add username and profile_picture to videos
             for video in videos:
-                # Initialize with default username
+                # Initialize with default values
                 video.username = "Unknown"
-                # Try to get the actual username if possible
+                video.profile_picture = None
+                # Try to get the actual username and profile_picture if possible
                 if video.user_id and str(video.user_id) in users:
                     video.username = users[str(video.user_id)].username
+                    video.profile_picture = users[str(video.user_id)].profile_picture
         else:
-            # Set default username if no users were found
+            # Set default values if no users were found
             for video in videos:
                 video.username = "Unknown"
+                video.profile_picture = None
         
         return videos
     except Exception as e:

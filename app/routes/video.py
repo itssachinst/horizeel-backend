@@ -7,7 +7,7 @@ from app.crud import (
     search_videos, save_video_for_user, unsave_video_for_user, 
     get_saved_videos_for_user, check_video_saved, delete_video
 )
-from app.utils.s3_utils import upload_to_s3
+from app.utils.s3_utils import upload_to_s3, convert_to_hls_and_upload
 from app.schemas import VideoCreate, VideoResponse
 from app.utils.auth import get_current_user, get_current_user_optional
 from app.models import User, Video, WatchHistory, Like
@@ -17,6 +17,12 @@ from pydantic import BaseModel, Field, validator
 from sqlalchemy.orm.exc import NoResultFound
 from datetime import datetime
 from sqlalchemy import not_
+import tempfile
+import os
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["videos"])
 
@@ -57,17 +63,43 @@ def upload_video(
     current_user = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    video = {"title": title, "description": description}
-    print(tfile.filename)
-    vfile_path = f"tmp/{vfile.filename}"
-    with open(vfile_path, "wb") as buffer:
-        buffer.write(vfile.file.read())
-    vfile_url = upload_to_s3(vfile_path, vfile.filename)
-    tfile_path = f"tmp/{tfile.filename}"
-    with open(tfile_path, "wb") as buffer:
-        buffer.write(tfile.file.read())
-    tfile_url = upload_to_s3(tfile_path, tfile.filename)
-    return create_video(db, video, vfile_url, tfile_url, str(current_user.user_id))
+    """
+    Upload a new video with HLS streaming support.
+    
+    - **title**: Title of the video
+    - **description**: Description of the video
+    - **vfile**: Video file to upload
+    - **tfile**: Thumbnail image for the video
+    """
+    try:
+        # Create a temporary directory for processing
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Save video file to temporary location
+            video_path = os.path.join(temp_dir, vfile.filename)
+            with open(video_path, "wb") as buffer:
+                buffer.write(vfile.file.read())
+            
+            # Convert video to HLS and upload to S3
+            video_url = convert_to_hls_and_upload(video_path, vfile.filename)
+            
+            # Save thumbnail to temporary location
+            thumbnail_path = os.path.join(temp_dir, tfile.filename)
+            with open(thumbnail_path, "wb") as buffer:
+                buffer.write(tfile.file.read())
+            
+            # Upload thumbnail to S3
+            thumbnail_url = upload_to_s3(thumbnail_path, tfile.filename)
+            
+            # Create video entry in database
+            video_data = {"title": title, "description": description}
+            return create_video(db, video_data, video_url, thumbnail_url, str(current_user.user_id))
+    
+    except Exception as e:
+        logger.error(f"Error uploading video: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload video: {str(e)}"
+        )
 
 @router.get("/videos/search", response_model=List[VideoResponse])
 def search_videos_endpoint(
