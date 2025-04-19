@@ -59,26 +59,40 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 async def redirect_to_https(request: Request, call_next):
     # Skip HTTPS redirect if it's disabled
     if not ENABLE_HTTPS_REDIRECT:
+        logger.debug("HTTPS redirect is disabled, proceeding normally")
         return await call_next(request)
         
     # Check for X-Forwarded-Proto header (from CloudFront/load balancer)
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     host = request.headers.get("host", "")
+    user_agent = request.headers.get("user-agent", "")
     
     # Only redirect if:
     # 1. It's not already HTTPS
     # 2. It's not a local request (localhost)
-    # 3. It's not a direct server health check
+    # 3. It's not a health check endpoint
+    path = request.url.path
+    is_health_check = path == "/api/health" or path == "/api/health/"
+    is_browser = "Mozilla" in user_agent
+    
+    # Debug logging for troubleshooting
+    logger.debug(f"Request: {path} | Proto: {forwarded_proto} | Host: {host} | Browser: {is_browser}")
+    
     if (forwarded_proto != "https" and request.url.scheme != "https" and
         "localhost" not in host and "127.0.0.1" not in host and
-        not request.url.path.endswith("/health")):
+        not is_health_check):
         
-        # Only redirect API endpoints for browser requests
-        if "/api/" in request.url.path and "Mozilla" in request.headers.get("user-agent", ""):
+        # Only redirect browser requests (with Mozilla in user agent)
+        # Non-browser clients like mobile apps, curl, etc. should work without redirect
+        if is_browser:
             # Build HTTPS URL for redirect
             https_url = str(request.url).replace("http://", "https://")
             logger.info(f"Redirecting browser to HTTPS: {https_url}")
             return RedirectResponse(https_url, status_code=301)  # 301 is more cache-friendly than 307
+        else:
+            logger.debug(f"Non-browser request, skipping HTTPS redirect for {path}")
+    elif is_health_check:
+        logger.debug(f"Health check endpoint, skipping HTTPS redirect for {path}")
     
     # For all other cases, just proceed normally
     return await call_next(request)
@@ -127,6 +141,7 @@ app.include_router(auth_router, prefix="/api/auth")
 app.include_router(waiting_list_router, prefix="/api/waiting-list")
 
 @app.get("/api/health")
+@app.get("/api/health/")
 async def health_check():
     """Health check endpoint for monitoring"""
     return {"status": "healthy", "version": "1.0.0"}
