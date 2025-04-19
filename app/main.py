@@ -54,7 +54,7 @@ app.add_middleware(
 # Add GZip compression for responses
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Manual HTTPS redirect middleware - with improvements for API clients
+# Manual HTTPS redirect middleware - with improvements for API clients and EC2
 @app.middleware("http")
 async def redirect_to_https(request: Request, call_next):
     # Check HTTPS redirect setting on each request (allows runtime changes)
@@ -65,45 +65,60 @@ async def redirect_to_https(request: Request, call_next):
         logger.debug("HTTPS redirect is disabled, proceeding normally")
         return await call_next(request)
         
-    # Check for X-Forwarded-Proto header (from CloudFront/load balancer)
-    forwarded_proto = request.headers.get("x-forwarded-proto", "")
+    # Log the original request for debugging
+    path = request.url.path
     host = request.headers.get("host", "")
     user_agent = request.headers.get("user-agent", "")
-    path = request.url.path
+    forwarded_proto = request.headers.get("x-forwarded-proto", "")
     
-    # Define exceptions to redirection
-    is_health_check = path == "/api/health" or path == "/api/health/"
+    # Special handling for EC2 instances
+    is_ec2 = "ec2" in host or "amazonaws" in host or "amazon" in host
+    if is_ec2:
+        logger.info(f"EC2 environment detected, skipping HTTPS redirect for {path}")
+        return await call_next(request)
+    
+    # Log the request details for debugging
+    logger.info(f"Request info - Path: {path} | Host: {host} | UA: {user_agent[:20] if user_agent else 'None'}... | Proto: {forwarded_proto}")
+    
+    # Define paths that should never be redirected
+    excluded_paths = [
+        "/api/health", 
+        "/api/health/",
+        "/api/videos",  # Explicitly exclude /api/videos endpoint
+    ]
+    
+    # Check if the path starts with any excluded path
+    is_excluded_path = any(path == excluded or path.startswith(excluded + "?") for excluded in excluded_paths)
     is_localhost = "localhost" in host or "127.0.0.1" in host
-    is_browser = "Mozilla" in user_agent
     is_already_https = forwarded_proto == "https" or request.url.scheme == "https"
+    is_browser = user_agent and "Mozilla" in user_agent
+    is_api_client = not is_browser
     
-    # Skip redirect for automated API calls, only redirect browser requests
-    is_api_client = not is_browser and "/api/" in path
+    # Never redirect API client requests (non-browser)
+    if is_api_client:
+        logger.info(f"API client detected, skipping HTTPS redirect for {path}")
+        return await call_next(request)
     
-    # Debug logging for troubleshooting
-    logger.debug(f"Request: {path} | Proto: {forwarded_proto} | Host: {host} | Browser: {is_browser}")
+    # Never redirect localhost
+    if is_localhost:
+        logger.info(f"Localhost detected, skipping HTTPS redirect for {path}")
+        return await call_next(request)
+        
+    # Never redirect excluded paths
+    if is_excluded_path:
+        logger.info(f"Excluded path detected, skipping HTTPS redirect for {path}")
+        return await call_next(request)
+        
+    # Never redirect already HTTPS requests
+    if is_already_https:
+        logger.info(f"Already HTTPS, skipping redirect for {path}")
+        return await call_next(request)
     
-    # Determine if we should skip the redirect 
-    should_skip_redirect = (
-        is_already_https or 
-        is_localhost or 
-        is_health_check or 
-        is_api_client  # This is new - skip redirects for API clients
-    )
-    
-    if not should_skip_redirect:
-        # Only redirect browser requests (with Mozilla in user agent)
-        if is_browser:
-            # Build HTTPS URL for redirect
-            https_url = str(request.url).replace("http://", "https://")
-            logger.info(f"Redirecting browser to HTTPS: {https_url}")
-            return RedirectResponse(https_url, status_code=301)  # 301 is more cache-friendly than 307
-        else:
-            logger.debug(f"Non-browser request, skipping HTTPS redirect for {path}")
-    elif is_api_client:
-        logger.debug(f"API client detected, skipping HTTPS redirect for {path}")
-    elif is_health_check:
-        logger.debug(f"Health check endpoint, skipping HTTPS redirect for {path}")
+    # At this point, we only redirect browser requests to non-excluded paths over HTTP
+    if is_browser:
+        https_url = str(request.url).replace("http://", "https://")
+        logger.info(f"Redirecting browser to HTTPS: {https_url}")
+        return RedirectResponse(https_url, status_code=301)
     
     # For all other cases, just proceed normally
     return await call_next(request)
