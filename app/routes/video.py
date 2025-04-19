@@ -5,9 +5,11 @@ from app.crud import (
     create_video, get_video, list_videos, video_views_increment, 
     video_likes_increment, video_dislikes_increment, 
     search_videos, save_video_for_user, unsave_video_for_user, 
-    get_saved_videos_for_user, check_video_saved, delete_video
+    get_saved_videos_for_user, check_video_saved, delete_video,
+    get_user_videos
 )
 from app.utils.s3_utils import upload_to_s3, convert_to_hls_and_upload
+from app.utils.youtube_utils import download_youtube_clip
 from app.schemas import VideoCreate, VideoResponse
 from app.utils.auth import get_current_user, get_current_user_optional
 from app.models import User, Video, WatchHistory, Like
@@ -20,6 +22,8 @@ from sqlalchemy import not_
 import tempfile
 import os
 import logging
+import subprocess
+import uuid
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -142,6 +146,7 @@ def search_videos_endpoint(
 def read_videos(
     pagination: PaginationParams = Depends(),
     current_user: Optional[User] = Depends(get_current_user_optional),
+    user_id: Optional[str] = Query(None, description="Filter videos by user ID"),
     db: Session = Depends(get_db)
 ):
     """
@@ -149,6 +154,7 @@ def read_videos(
     
     - **skip**: Number of videos to skip (pagination offset)
     - **limit**: Maximum number of videos to return (pagination limit)
+    - **user_id**: Optional UUID of user to filter videos by (returns only this user's videos)
     
     For authenticated users, returns a personalized feed based on:
     - Watch history
@@ -158,11 +164,35 @@ def read_videos(
     - New videos
     
     For unauthenticated users, returns trending videos.
+    
+    If user_id is provided, returns only videos from the specified user.
     """
     try:
-        user_id = str(current_user.user_id) if current_user else None
-        videos = list_videos(db, skip=pagination.skip, limit=pagination.limit, user_id=user_id)
+        # If user_id is provided in query params, filter by user
+        if user_id:
+            try:
+                videos = get_user_videos(db, user_id, skip=pagination.skip, limit=pagination.limit)
+                
+                if not videos and not db.query(User).filter(User.user_id == user_id).first():
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"User with ID {user_id} not found"
+                    )
+                    
+                return videos
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid user ID format"
+                )
+        
+        # Otherwise, use the standard personalized feed logic
+        auth_user_id = str(current_user.user_id) if current_user else None
+        videos = list_videos(db, skip=pagination.skip, limit=pagination.limit, user_id=auth_user_id)
         return videos
+        
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -573,4 +603,132 @@ async def delete_watch_history(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete watch history: {str(e)}"
+        )
+
+@router.post("/videos/youtube", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
+async def upload_youtube_video(
+    youtube_url: str = Form(..., description="YouTube video URL"),
+    title: str = Form(..., description="Video title"),
+    description: str = Form(..., description="Video description"),
+    start_time: Optional[int] = Form(0, description="Start time in seconds"),
+    end_time: Optional[int] = Form(None, description="End time in seconds"),
+    current_user = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Download a YouTube video, convert it to HLS format, and upload to S3.
+    
+    - **youtube_url**: URL of the YouTube video
+    - **title**: Title for the video
+    - **description**: Description for the video
+    - **start_time**: Start time in seconds (default: 0)
+    - **end_time**: End time in seconds (optional)
+    
+    Notes:
+    - Maximum video duration is 60 seconds
+    - If end_time is not provided, it will be set to start_time + 60s or the video end, whichever is earlier
+    - YouTube URL will not be stored in the database
+    """
+    try:
+        # Validate inputs
+        if not youtube_url:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="YouTube URL is required"
+            )
+        
+        if start_time < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Start time cannot be negative"
+            )
+            
+        if end_time is not None and end_time <= start_time:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="End time must be greater than start time"
+            )
+            
+        # Create a temporary directory
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Download video from YouTube
+            video_path, video_title, duration = download_youtube_clip(
+                youtube_url, 
+                temp_dir, 
+                start_time, 
+                end_time
+            )
+            
+            # If no title provided, use the YouTube video title
+            if not title.strip():
+                title = video_title
+                
+            # Convert the video to HLS and upload to S3
+            video_url = convert_to_hls_and_upload(video_path, f"{uuid.uuid4()}.mp4")
+            
+            # Create a thumbnail from the video
+            thumbnail_path = os.path.join(temp_dir, "thumbnail.jpg")
+            thumbnail_cmd = [
+                'ffmpeg', '-y',
+                '-i', video_path,
+                '-ss', '00:00:01',
+                '-vframes', '1',
+                thumbnail_path
+            ]
+            subprocess.run(thumbnail_cmd, check=True)
+            
+            # Upload thumbnail to S3
+            thumbnail_url = upload_to_s3(thumbnail_path, f"thumbnail_{uuid.uuid4()}.jpg")
+            
+            # Create video entry in database (without storing YouTube URL)
+            video_data = {
+                "title": title,
+                "description": description,
+                "duration": duration
+            }
+            
+            # Create the video in the database
+            return create_video(db, video_data, video_url, thumbnail_url, str(current_user.user_id))
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing YouTube video: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process YouTube video: {str(e)}"
+        )
+
+@router.get("/users/{user_id}/videos", response_model=List[VideoResponse])
+def get_videos_by_user_id(
+    user_id: UUID = Path(..., description="The UUID of the user whose videos to retrieve"),
+    skip: int = Query(0, ge=0, description="Number of videos to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Maximum number of videos to return"),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db)
+):
+    """
+    Get videos uploaded by a specific user.
+    
+    - **user_id**: UUID of the user whose videos to retrieve
+    - **skip**: Number of videos to skip (pagination offset)
+    - **limit**: Maximum number of videos to return (pagination limit)
+    """
+    try:
+        videos = get_user_videos(db, user_id, skip=skip, limit=limit)
+        
+        if not videos and not db.query(User).filter(User.user_id == user_id).first():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User with ID {user_id} not found"
+            )
+                
+        return videos
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error retrieving user videos: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve user videos: {str(e)}"
         )

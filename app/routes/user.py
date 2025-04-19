@@ -68,6 +68,13 @@ def read_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
 # Get specific user by ID
 @router.get("/{user_id}", response_model=schemas.UserResponse)
 def read_user(user_id: str, db: Session = Depends(get_db)):
+    # Validate that user_id is a UUID
+    try:
+        from uuid import UUID
+        UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
+        
     db_user = crud.get_user_by_id(db, user_id=user_id)
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -118,6 +125,13 @@ def follow_user(
     """
     Follow a user
     """
+    # Validate that user_id is a UUID
+    try:
+        from uuid import UUID
+        UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
+        
     # Check if the user exists
     user_to_follow = crud.get_user_by_id(db, user_id=user_id)
     if not user_to_follow:
@@ -173,6 +187,13 @@ def get_followers(
     """
     Get all users who follow the specified user
     """
+    # Validate that user_id is a UUID
+    try:
+        from uuid import UUID
+        UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
+        
     # Check if the user exists
     user = crud.get_user_by_id(db, user_id=user_id)
     if not user:
@@ -233,6 +254,13 @@ def get_follow_stats(
     """
     Get follower and following counts for a user
     """
+    # Validate that user_id is a UUID
+    try:
+        from uuid import UUID
+        UUID(user_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user ID format")
+        
     # Check if the user exists
     user = crud.get_user_by_id(db, user_id=user_id)
     if not user:
@@ -300,19 +328,6 @@ async def upload_profile_image(
     except Exception as e:
         logger.error(f"Error uploading profile image: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to upload profile image: {str(e)}")
-
-@router.get("/{user_id}/follow-stats", response_model=dict)
-def get_follow_stats(user_id: int, db: Session = Depends(get_db)):
-    """
-    Get the follower and following counts for a user
-    """
-    follower_count = crud.get_follower_count(db, user_id)
-    following_count = crud.get_following_count(db, user_id)
-    
-    return {
-        "followers_count": follower_count,
-        "following_count": following_count
-    }
 
 @router.post("/feedback", response_model=schemas.UserResponse)
 async def submit_user_feedback(

@@ -35,13 +35,15 @@ def create_video(db: Session, video: VideoCreate, vfile_url: str, tfile_url: str
             except ValueError:
                 logger.warning(f"Invalid UUID format for user_id: {user_id}")
         
+        # Create the video object
         db_video = Video(
             video_id=uuid4(),
             title=video["title"],
             description=video["description"],
             video_url=vfile_url,
             thumbnail_url=tfile_url,
-            user_id=user_id_uuid
+            user_id=user_id_uuid,
+            duration=video.get("duration", 0)  # Set duration if provided
         )
         db.add(db_video)
         db.commit()
@@ -401,6 +403,14 @@ def get_user_by_username(db: Session, username: str):
 def get_user_by_id(db: Session, user_id: Union[str, uuid4]) -> Optional[User]:
     """Get a user by ID."""
     try:
+        # Validate user_id is a proper UUID
+        if isinstance(user_id, str):
+            try:
+                user_id = UUID(user_id)
+            except ValueError:
+                logger.error(f"Invalid UUID format for user_id: {user_id}")
+                return None
+                
         return db.query(User).filter(User.user_id == user_id).first()
     except Exception as e:
         logger.error(f"Failed to get user by ID '{user_id}': {str(e)}")
@@ -912,4 +922,49 @@ def get_waiting_list(db: Session, skip: int = 0, limit: int = 100):
         return db.query(WaitingList).order_by(WaitingList.created_at.desc()).offset(skip).limit(limit).all()
     except Exception as e:
         logger.error(f"Failed to get waiting list: {str(e)}")
+        raise
+
+def get_user_videos(db: Session, user_id: Union[str, UUID], skip: int = 0, limit: int = 20):
+    """
+    Get videos uploaded by a specific user
+    
+    Args:
+        db: Database session
+        user_id: ID of the user whose videos to retrieve
+        skip: Number of records to skip (pagination)
+        limit: Maximum number of records to return (pagination)
+        
+    Returns:
+        List of Video objects uploaded by the specified user
+    """
+    try:
+        # Ensure user_id is a UUID
+        if isinstance(user_id, str):
+            try:
+                user_id = UUID(user_id)
+            except ValueError:
+                logger.warning(f"Invalid UUID format for user_id: {user_id}")
+                return []
+
+        # First check if the user exists
+        user = db.query(User).filter(User.user_id == user_id).first()
+        if not user:
+            logger.warning(f"User not found with ID: {user_id}")
+            return []
+            
+        # Query videos by this user
+        videos = db.query(Video).filter(
+            Video.user_id == user_id
+        ).order_by(
+            Video.created_at.desc()
+        ).offset(skip).limit(limit).all()
+        
+        # Set username for all videos
+        for video in videos:
+            video.username = user.username
+            video.profile_picture = user.profile_picture
+            
+        return videos
+    except Exception as e:
+        logger.error(f"Error getting user videos: {str(e)}")
         raise

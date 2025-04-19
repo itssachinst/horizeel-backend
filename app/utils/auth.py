@@ -70,8 +70,18 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
-        if user_id is None:
+        if user_id is None or user_id == "undefined":
             raise credentials_exception
+            
+        # Validate that user_id is a valid UUID
+        try:
+            from uuid import UUID
+            UUID(user_id)
+        except ValueError:
+            import logging
+            logging.error(f"Invalid UUID format in token: {user_id}")
+            raise credentials_exception
+            
         token_data = schemas.TokenData(user_id=user_id)
     except JWTError:
         raise credentials_exception
@@ -93,8 +103,20 @@ async def get_current_user_optional(token: Optional[str] = Depends(oauth2_scheme
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
-        if user_id is None:
+        if user_id is None or user_id == "undefined":
+            import logging
+            logging.warning(f"Invalid user_id in token: {user_id}")
             return None
+            
+        # Validate that user_id is a valid UUID
+        try:
+            from uuid import UUID
+            UUID(user_id)
+        except ValueError:
+            import logging
+            logging.warning(f"Invalid UUID format in token: {user_id}")
+            return None
+            
         token_data = schemas.TokenData(user_id=user_id)
     except JWTError:
         return None
