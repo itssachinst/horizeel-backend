@@ -624,14 +624,34 @@ def delete_video(db: Session, video_id: str, user_id: str):
     if str(video.user_id) != user_id:
         return False
     
-    # First delete any saved video references
-    db.query(SavedVideo).filter(SavedVideo.video_id == video_id).delete()
-    
-    # Then delete the video itself
-    db.delete(video)
-    db.commit()
-    
-    return True
+    try:
+        # Try to delete any like records first
+        from sqlalchemy import text
+        try:
+            # First attempt to delete from likes table if it exists
+            db.execute(text(f"DELETE FROM likes WHERE video_id = '{video_id}'"))
+        except Exception as e:
+            # If the likes table doesn't exist or any other error occurs, log it but continue
+            logger.warning(f"Could not delete from likes table for video {video_id}: {str(e)}")
+        
+        # Delete any saved video references
+        db.query(SavedVideo).filter(SavedVideo.video_id == video_id).delete()
+        
+        # Delete any watch history records
+        try:
+            db.query(WatchHistory).filter(WatchHistory.video_id == video_id).delete()
+        except Exception as e:
+            logger.warning(f"Could not delete from watch_history for video {video_id}: {str(e)}")
+        
+        # Then delete the video itself
+        db.delete(video)
+        db.commit()
+        
+        return True
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting video {video_id}: {str(e)}")
+        return False
 
 # Follow system functions
 def follow_user(db: Session, follower_id: str, followed_id: str):
