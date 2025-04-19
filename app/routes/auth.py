@@ -20,14 +20,13 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 class PasswordResetRequest(BaseModel):
     email: EmailStr
-    new_password: str = Field(..., min_length=8)
+    new_password: str = Field(..., min_length=6)
     
     @validator('new_password')
     def password_strength(cls, v):
+        # Simplified validation to check only minimum length and at least one digit
         if not any(char.isdigit() for char in v):
             raise ValueError('Password must contain at least one digit')
-        if not any(char.isupper() for char in v):
-            raise ValueError('Password must contain at least one uppercase letter')
         return v
 
 class LoginRequest(BaseModel):
@@ -83,15 +82,45 @@ async def login(
 
 @router.post("/direct-reset-password", response_model=dict)
 async def reset_password(
-    request: PasswordResetRequest,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
     Reset a user's password directly without email verification.
     """
     try:
+        # Parse the request body manually
+        body = await request.json()
+        print(f"Received password reset request: {body}")
+        
+        # Manual validation
+        if 'email' not in body:
+            return {
+                "message": "Email field is required",
+                "status": "error",
+                "detail": "validation_error"
+            }
+        
+        if 'new_password' not in body:
+            return {
+                "message": "new_password field is required",
+                "status": "error",
+                "detail": "validation_error"
+            }
+        
+        email = body['email']
+        new_password = body['new_password']
+        
+        # Basic password validation
+        if len(new_password) < 6:
+            return {
+                "message": "Password must be at least 6 characters",
+                "status": "error",
+                "detail": "validation_error"
+            }
+        
         # Find the user by email
-        user = get_user_by_email(db, request.email)
+        user = get_user_by_email(db, email)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -99,7 +128,7 @@ async def reset_password(
             )
 
         # Hash the new password
-        hashed_password = get_password_hash(request.new_password)
+        hashed_password = get_password_hash(new_password)
 
         # Update the user's password
         user.password_hash = hashed_password
@@ -114,6 +143,7 @@ async def reset_password(
         raise
     except Exception as e:
         db.rollback()
+        print(f"Password reset error: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to reset password: {str(e)}"
