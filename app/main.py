@@ -54,11 +54,14 @@ app.add_middleware(
 # Add GZip compression for responses
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
-# Manual HTTPS redirect middleware - even simpler approach, only redirect specific endpoints
+# Manual HTTPS redirect middleware - with improvements for API clients
 @app.middleware("http")
 async def redirect_to_https(request: Request, call_next):
+    # Check HTTPS redirect setting on each request (allows runtime changes)
+    enable_https_redirect = os.environ.get("ENABLE_HTTPS_REDIRECT", "true").lower() == "true"
+    
     # Skip HTTPS redirect if it's disabled
-    if not ENABLE_HTTPS_REDIRECT:
+    if not enable_https_redirect:
         logger.debug("HTTPS redirect is disabled, proceeding normally")
         return await call_next(request)
         
@@ -66,24 +69,30 @@ async def redirect_to_https(request: Request, call_next):
     forwarded_proto = request.headers.get("x-forwarded-proto", "")
     host = request.headers.get("host", "")
     user_agent = request.headers.get("user-agent", "")
-    
-    # Only redirect if:
-    # 1. It's not already HTTPS
-    # 2. It's not a local request (localhost)
-    # 3. It's not a health check endpoint
     path = request.url.path
+    
+    # Define exceptions to redirection
     is_health_check = path == "/api/health" or path == "/api/health/"
+    is_localhost = "localhost" in host or "127.0.0.1" in host
     is_browser = "Mozilla" in user_agent
+    is_already_https = forwarded_proto == "https" or request.url.scheme == "https"
+    
+    # Skip redirect for automated API calls, only redirect browser requests
+    is_api_client = not is_browser and "/api/" in path
     
     # Debug logging for troubleshooting
     logger.debug(f"Request: {path} | Proto: {forwarded_proto} | Host: {host} | Browser: {is_browser}")
     
-    if (forwarded_proto != "https" and request.url.scheme != "https" and
-        "localhost" not in host and "127.0.0.1" not in host and
-        not is_health_check):
-        
+    # Determine if we should skip the redirect 
+    should_skip_redirect = (
+        is_already_https or 
+        is_localhost or 
+        is_health_check or 
+        is_api_client  # This is new - skip redirects for API clients
+    )
+    
+    if not should_skip_redirect:
         # Only redirect browser requests (with Mozilla in user agent)
-        # Non-browser clients like mobile apps, curl, etc. should work without redirect
         if is_browser:
             # Build HTTPS URL for redirect
             https_url = str(request.url).replace("http://", "https://")
@@ -91,6 +100,8 @@ async def redirect_to_https(request: Request, call_next):
             return RedirectResponse(https_url, status_code=301)  # 301 is more cache-friendly than 307
         else:
             logger.debug(f"Non-browser request, skipping HTTPS redirect for {path}")
+    elif is_api_client:
+        logger.debug(f"API client detected, skipping HTTPS redirect for {path}")
     elif is_health_check:
         logger.debug(f"Health check endpoint, skipping HTTPS redirect for {path}")
     

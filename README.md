@@ -45,6 +45,19 @@ If you're experiencing 307 Temporary Redirect responses:
 2. Restart the application
 3. For API clients, make sure your requests don't include browser user-agent strings (which may trigger HTTPS redirects)
 
+#### Explanation of the Fix
+
+The 307 redirects were happening because:
+- The HTTPS redirect middleware was enabled by default
+- It was redirecting all requests, even API clients
+- It wasn't properly handling paths with or without trailing slashes
+
+Our solution:
+1. Made the middleware skip redirects for API clients (non-browser requests)
+2. Added proper handling for both `/api/health` and `/api/health/` paths
+3. Improved the logic to skip redirects for localhost and already-HTTPS connections
+4. Added runtime environment variable checking for easier testing
+
 ### 401 Unauthorized
 
 For authenticated endpoints like `/api/users/me`:
