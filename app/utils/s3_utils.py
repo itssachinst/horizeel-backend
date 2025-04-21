@@ -64,13 +64,14 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
         ffmpeg_cmd = [
             'ffmpeg', '-y',
             '-i', input_path,
-            '-c:v', 'libx264',             # Force H.264
-            '-c:a', 'aac',                 # Force AAC audio
-            '-b:a', '128k',                # Audio bitrate
+            '-c:v', 'libx264',
+            '-b:v', '1200k',                          # Optional: Compress video
+            '-c:a', 'aac',
+            '-b:a', '128k',
             '-profile:v', 'baseline',
             '-level', '3.0',
-            '-x264-params', 'keyint=48:min-keyint=48:no-scenecut',  # Force keyframe every 2s (for 24fps)
-            '-hls_time', '6',              # Try smaller segments (6s)
+            '-x264-params', 'keyint=48:min-keyint=48:no-scenecut',
+            '-hls_time', '4',
             '-hls_list_size', '0',
             '-start_number', '0',
             '-f', 'hls',
