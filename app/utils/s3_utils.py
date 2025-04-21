@@ -71,7 +71,6 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
             '-level', '3.0',
             '-x264-params', 'keyint=48:min-keyint=48:no-scenecut',  # Force keyframe every 2s (for 24fps)
             '-hls_time', '6',              # Try smaller segments (6s)
-            '-hls_segment_filename',   # Clean segment naming
             '-hls_list_size', '0',
             '-start_number', '0',
             '-f', 'hls',
