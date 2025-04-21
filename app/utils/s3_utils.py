@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import shutil
 import uuid
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,52 @@ def upload_to_s3(file_path: str, file_name: str) -> str:
     
     return f"https://{S3_BUCKET}.s3.eu-north-1.amazonaws.com/{file_name}"
 
+def validate_video_file(file_path: str) -> dict:
+    """
+    Validate a video file using ffprobe and return its metadata
+    
+    Args:
+        file_path: Path to the video file
+        
+    Returns:
+        dict with video metadata or raises an exception if invalid
+    """
+    try:
+        cmd = [
+            'ffprobe', 
+            '-v', 'error',
+            '-show_entries', 'stream=codec_type,codec_name,width,height,duration,bit_rate,pix_fmt',
+            '-show_entries', 'format=duration,size,bit_rate',
+            '-of', 'json',
+            file_path
+        ]
+        
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        metadata = json.loads(result.stdout)
+        
+        # Check if file has video streams
+        has_video = False
+        has_audio = False
+        
+        for stream in metadata.get('streams', []):
+            if stream.get('codec_type') == 'video':
+                has_video = True
+            elif stream.get('codec_type') == 'audio':
+                has_audio = True
+        
+        if not has_video:
+            raise ValueError("File does not contain a valid video stream")
+            
+        return metadata
+    except subprocess.CalledProcessError as e:
+        error_message = e.stderr.decode('utf-8', errors='replace')
+        logger.error(f"Error validating video file: {error_message}")
+        raise ValueError(f"Invalid video file: {error_message}")
+    except json.JSONDecodeError:
+        raise ValueError("Could not parse video metadata")
+    except Exception as e:
+        raise ValueError(f"Error analyzing video: {str(e)}")
+
 def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
     """
     Convert a video file to HLS format and upload to S3
@@ -47,6 +94,14 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
     """
     # Create a unique ID for this video
     video_id = str(uuid.uuid4())
+    
+    # Validate video before processing
+    try:
+        metadata = validate_video_file(input_path)
+        logger.info(f"Video validated successfully: {filename}")
+    except ValueError as e:
+        logger.error(f"Video validation failed: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Invalid video file: {str(e)}")
     
     # Create temporary directory for HLS output
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -65,25 +120,60 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
             'ffmpeg', '-y',
             '-i', input_path,
             '-c:v', 'libx264',
-            '-b:v', '1200k',                          # Optional: Compress video
+            '-b:v', '1200k',
             '-c:a', 'aac',
             '-b:a', '128k',
             '-profile:v', 'baseline',
             '-level', '3.0',
-            '-x264-params', 'keyint=48:min-keyint=48:no-scenecut',
+            '-pix_fmt', 'yuv420p',
+            '-max_muxing_queue_size', '9999',
             '-hls_time', '4',
             '-hls_list_size', '0',
+            '-hls_segment_filename', f"{output_path}/segment_%03d.ts",
             '-start_number', '0',
             '-f', 'hls',
             hls_playlist
         ]
         
         try:
-            subprocess.run(ffmpeg_cmd, check=True)
-            logger.info(f"Successfully converted {filename} to HLS format")
+            process = subprocess.run(ffmpeg_cmd, check=False, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+            if process.returncode != 0:
+                error_msg = process.stderr.decode('utf-8', errors='replace')
+                logger.error(f"FFmpeg conversion failed with code {process.returncode}: {error_msg}")
+                
+                # Try fallback conversion with simpler parameters
+                logger.info("Attempting fallback conversion with simpler parameters")
+                fallback_cmd = [
+                    'ffmpeg', '-y',
+                    '-i', input_path,
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-pix_fmt', 'yuv420p',
+                    '-c:a', 'aac',
+                    '-f', 'hls',
+                    '-hls_time', '4',
+                    '-hls_list_size', '0',
+                    '-hls_segment_filename', f"{output_path}/segment_%03d.ts",
+                    '-start_number', '0',
+                    hls_playlist
+                ]
+                
+                fallback_process = subprocess.run(fallback_cmd, check=False, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
+                if fallback_process.returncode != 0:
+                    fallback_error = fallback_process.stderr.decode('utf-8', errors='replace')
+                    logger.error(f"Fallback FFmpeg conversion also failed: {fallback_error}")
+                    raise HTTPException(status_code=500, detail=f"Failed to convert video to HLS format: {error_msg[:200]}")
+                else:
+                    logger.info(f"Fallback conversion successful for {filename}")
+            else:
+                logger.info(f"Successfully converted {filename} to HLS format")
         except subprocess.CalledProcessError as e:
-            logger.error(f"FFmpeg conversion failed: {e}")
-            raise HTTPException(status_code=500, detail="Failed to convert video to HLS format")
+            error_output = e.stderr.decode('utf-8', errors='replace') if e.stderr else str(e)
+            logger.error(f"FFmpeg conversion failed: {error_output}")
+            raise HTTPException(status_code=500, detail=f"Failed to convert video to HLS format: {error_output[:300]}")
+        except Exception as e:
+            logger.error(f"Unexpected error during video conversion: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Video conversion error: {str(e)}")
         
         # S3 prefix for this video
         s3_prefix = f"{HLS_FOLDER}{video_id}/"
