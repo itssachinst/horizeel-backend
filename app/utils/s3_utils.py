@@ -120,11 +120,10 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
             'ffmpeg', '-y',
             '-i', input_path,
             '-c:v', 'libx264',
-            '-b:v', '1200k',
+            '-crf', '18',  # Lower CRF means higher quality (18 is visually lossless)
+            '-preset', 'slow',  # Better compression efficiency
             '-c:a', 'aac',
-            '-b:a', '128k',
-            '-profile:v', 'baseline',
-            '-level', '3.0',
+            '-b:a', '192k',  # Higher audio bitrate
             '-pix_fmt', 'yuv420p',
             '-max_muxing_queue_size', '9999',
             '-hls_time', '4',
@@ -141,15 +140,17 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
                 error_msg = process.stderr.decode('utf-8', errors='replace')
                 logger.error(f"FFmpeg conversion failed with code {process.returncode}: {error_msg}")
                 
-                # Try fallback conversion with simpler parameters
+                # Try fallback conversion with simpler parameters but still high quality
                 logger.info("Attempting fallback conversion with simpler parameters")
                 fallback_cmd = [
                     'ffmpeg', '-y',
                     '-i', input_path,
                     '-c:v', 'libx264',
-                    '-preset', 'fast',
+                    '-crf', '23',  # Still good quality
+                    '-preset', 'medium',
                     '-pix_fmt', 'yuv420p',
                     '-c:a', 'aac',
+                    '-b:a', '128k',
                     '-f', 'hls',
                     '-hls_time', '4',
                     '-hls_list_size', '0',
