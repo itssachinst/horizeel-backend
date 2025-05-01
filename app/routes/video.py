@@ -334,7 +334,7 @@ def unsave_video(
 @router.get("/videos/{video_id}/saved")
 def check_if_video_saved(
     video_id: str,
-    current_user: User = Depends(get_current_user),
+    current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db)
 ):
     """Check if a video is saved by the current user"""
@@ -342,6 +342,10 @@ def check_if_video_saved(
     db_video = get_video(db, video_id)
     if not db_video:
         raise HTTPException(status_code=404, detail="Video not found")
+    
+    # If user is not authenticated, video cannot be saved
+    if current_user is None:
+        return {"is_saved": False}
     
     # Check if the video is saved
     is_saved = check_video_saved(db, str(current_user.user_id), video_id)

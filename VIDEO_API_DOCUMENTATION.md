@@ -6,7 +6,7 @@ This document describes the API endpoints for video management in the backend.
 All endpoints are prefixed with `/api`
 
 ## Authentication
-The upload endpoint requires authentication using a JWT token. The token should be included in the `Authorization` header as `Bearer <token>`.
+Protected endpoints require authentication using a JWT token. The token should be included in the `Authorization` header as `Bearer <token>`. See [AUTH_API_DOCUMENTATION.md](AUTH_API_DOCUMENTATION.md) for detailed authentication information.
 
 ## Endpoints
 
@@ -14,6 +14,8 @@ The upload endpoint requires authentication using a JWT token. The token should 
 - **URL**: `/videos/`
 - **Method**: `POST`
 - **Auth required**: Yes
+- **Headers**:
+  - `Authorization: Bearer <token>`
 - **Request Body**: Multipart Form
   - `title`: string (required) - The title of the video
   - `description`: string (required) - The description of the video
@@ -149,7 +151,7 @@ The upload endpoint requires authentication using a JWT token. The token should 
   - **Content**:
     ```json
     {
-      "message": "View count incremented successfully",
+      "message": "Like count incremented successfully",
       "likes": integer
     }
     ```
@@ -165,7 +167,7 @@ The upload endpoint requires authentication using a JWT token. The token should 
   - **Content**:
     ```json
     {
-      "message": "View count incremented successfully",
+      "message": "Dislike count incremented successfully",
       "dislikes": integer
     }
     ```
@@ -181,7 +183,7 @@ The upload endpoint requires authentication using a JWT token. The token should 
   - **Content**:
     ```json
     {
-      "message": "View count incremented successfully",
+      "message": "Subscriber count incremented successfully",
       "subscribers": integer
     }
     ``` 

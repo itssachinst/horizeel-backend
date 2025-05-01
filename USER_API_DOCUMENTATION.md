@@ -6,7 +6,7 @@ This document describes the API endpoints for user management in the backend.
 All endpoints are prefixed with `/api/users`
 
 ## Authentication
-Most endpoints require authentication using a JWT token. The token should be included in the `Authorization` header as `Bearer <token>`.
+Most endpoints require authentication using a JWT token. The token should be included in the `Authorization` header as `Bearer <token>`. See [AUTH_API_DOCUMENTATION.md](AUTH_API_DOCUMENTATION.md) for detailed authentication information.
 
 ## Endpoints
 
@@ -43,19 +43,19 @@ Most endpoints require authentication using a JWT token. The token should be inc
 - **URL**: `/login`
 - **Method**: `POST`
 - **Auth required**: No
-- **Request Body**:
+- **Request Body**: Form Data
   ```
-  username: string (this is actually the email)
+  username: string (email)
   password: string
   ```
-  *Note: This endpoint uses form data rather than JSON*
 - **Success Response**: 
   - **Code**: 200 OK
   - **Content**:
     ```json
     {
       "access_token": "string",
-      "token_type": "bearer"
+      "token_type": "bearer",
+      "user_id": "string (uuid)"
     }
     ```
 - **Error Response**:
@@ -66,6 +66,8 @@ Most endpoints require authentication using a JWT token. The token should be inc
 - **URL**: `/me`
 - **Method**: `GET`
 - **Auth required**: Yes (token)
+- **Headers**:
+  - `Authorization: Bearer <token>`
 - **Success Response**: 
   - **Code**: 200 OK
   - **Content**:
@@ -134,6 +136,8 @@ Most endpoints require authentication using a JWT token. The token should be inc
 - **URL**: `/{user_id}`
 - **Method**: `PUT`
 - **Auth required**: Yes (token, and must be the same user)
+- **Headers**:
+  - `Authorization: Bearer <token>`
 - **URL Parameters**:
   - `user_id`: string (uuid) - The ID of the user to update
 - **Request Body**:
@@ -169,6 +173,8 @@ Most endpoints require authentication using a JWT token. The token should be inc
 - **URL**: `/{user_id}`
 - **Method**: `DELETE`
 - **Auth required**: Yes (token, and must be the same user)
+- **Headers**:
+  - `Authorization: Bearer <token>`
 - **URL Parameters**:
   - `user_id`: string (uuid) - The ID of the user to delete
 - **Success Response**: 
