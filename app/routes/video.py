@@ -78,10 +78,20 @@ def upload_video(
     try:
         # Create a temporary directory for processing
         with tempfile.TemporaryDirectory() as temp_dir:
-            # Save video file to temporary location
+            # Save video file to temporary location using chunked reading
             video_path = os.path.join(temp_dir, vfile.filename)
+            
+            # Write file in chunks to avoid memory issues with large files
+            chunk_size = 1024 * 1024  # 1MB chunks
             with open(video_path, "wb") as buffer:
-                buffer.write(vfile.file.read())
+                while True:
+                    chunk = vfile.file.read(chunk_size)
+                    if not chunk:
+                        break
+                    buffer.write(chunk)
+            
+            # Reset file cursor for potential future use
+            vfile.file.seek(0)
             
             # Convert video to HLS and upload to S3
             video_url = convert_to_hls_and_upload(video_path, vfile.filename)
@@ -89,7 +99,15 @@ def upload_video(
             # Save thumbnail to temporary location
             thumbnail_path = os.path.join(temp_dir, tfile.filename)
             with open(thumbnail_path, "wb") as buffer:
-                buffer.write(tfile.file.read())
+                # Thumbnails are smaller, but still use chunked reading for consistency
+                while True:
+                    chunk = tfile.file.read(chunk_size)
+                    if not chunk:
+                        break
+                    buffer.write(chunk)
+            
+            # Reset thumbnail file cursor
+            tfile.file.seek(0)
             
             # Upload thumbnail to S3
             thumbnail_url = upload_to_s3(thumbnail_path, tfile.filename)

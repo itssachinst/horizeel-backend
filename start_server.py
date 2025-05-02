@@ -15,7 +15,7 @@ def main():
     # Check if Python is in the path
     python_cmd = sys.executable
     
-    # Build the uvicorn command
+    # Build the uvicorn command with increased timeout for large uploads
     cmd = [
         python_cmd,
         "-m",
@@ -24,9 +24,12 @@ def main():
         "--reload",
         "--host", "0.0.0.0",
         "--port", "8000",
+        "--timeout-keep-alive", "120",  # Increase keep-alive timeout (default 5s)
+        "--limit-concurrency", "50",    # Allow more concurrent connections
+        "--timeout-graceful-shutdown", "300",  # Allow longer graceful shutdown
     ]
     
-    print(f"Starting FastAPI server with HTTPS redirects disabled...")
+    print(f"Starting FastAPI server with HTTPS redirects disabled and increased timeouts for large uploads...")
     print(f"Command: {' '.join(cmd)}")
     
     # Run the command

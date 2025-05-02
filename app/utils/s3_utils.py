@@ -97,8 +97,33 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
     
     # Validate video before processing
     try:
+        # Check file size before processing
+        file_size_mb = os.path.getsize(input_path) / (1024 * 1024)
+        logger.info(f"Processing video file: {filename}, Size: {file_size_mb:.2f} MB")
+        
         metadata = validate_video_file(input_path)
         logger.info(f"Video validated successfully: {filename}")
+        
+        # Extract video duration and dimensions for logging
+        duration = None
+        width = None
+        height = None
+        
+        for stream in metadata.get('streams', []):
+            if stream.get('codec_type') == 'video':
+                width = stream.get('width')
+                height = stream.get('height')
+                if not duration and 'duration' in stream:
+                    duration = stream.get('duration')
+        
+        if not duration and 'format' in metadata and 'duration' in metadata['format']:
+            duration = metadata['format']['duration']
+        
+        if duration:
+            logger.info(f"Video duration: {float(duration):.2f} seconds")
+        if width and height:
+            logger.info(f"Video dimensions: {width}x{height}")
+        
     except ValueError as e:
         logger.error(f"Video validation failed: {str(e)}")
         raise HTTPException(status_code=400, detail=f"Invalid video file: {str(e)}")
@@ -134,6 +159,7 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
             hls_playlist
         ]
         
+        logger.info(f"Starting FFmpeg conversion for {filename}")
         try:
             process = subprocess.run(ffmpeg_cmd, check=False, stderr=subprocess.PIPE, stdout=subprocess.PIPE)
             if process.returncode != 0:
@@ -179,7 +205,12 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
         # S3 prefix for this video
         s3_prefix = f"{HLS_FOLDER}{video_id}/"
         
+        # Count files to upload
+        file_count = sum(len(files) for _, _, files in os.walk(output_path))
+        logger.info(f"Uploading {file_count} HLS files to S3")
+        
         # Upload all HLS files to S3
+        uploaded_count = 0
         for root, _, files in os.walk(output_path):
             for file in files:
                 local_file_path = os.path.join(root, file)
@@ -195,13 +226,17 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
                         s3_key,
                         ExtraArgs={'ContentType': content_type}
                     )
-                    logger.info(f"Uploaded {s3_key} to S3")
+                    uploaded_count += 1
+                    if uploaded_count % 10 == 0 or uploaded_count == file_count:
+                        logger.info(f"Uploaded {uploaded_count}/{file_count} files to S3")
                 except ClientError as e:
                     logger.error(f"Error uploading {s3_key} to S3: {e}")
                     raise HTTPException(status_code=500, detail="Failed to upload HLS files to S3")
         
         # Return the URL to the HLS playlist
-        return f"https://{S3_BUCKET}.s3.eu-north-1.amazonaws.com/{s3_prefix}index.m3u8"
+        url = f"https://{S3_BUCKET}.s3.eu-north-1.amazonaws.com/{s3_prefix}index.m3u8"
+        logger.info(f"HLS conversion and upload complete. URL: {url}")
+        return url
 
 async def upload_video_to_s3(file: UploadFile, video_id: str):
     """Upload a video file to S3"""

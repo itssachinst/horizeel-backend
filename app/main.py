@@ -11,6 +11,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 import os
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -18,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 # Environment check for enabling HTTPS middleware
 ENABLE_HTTPS_REDIRECT = os.environ.get("ENABLE_HTTPS_REDIRECT", "false").lower() == "true"
+
+# Increase max upload size to 500MB (default is 1MB)
+# This modifies Starlette's UploadFile class to increase the maximum file size
+StarletteUploadFile.spool_max_size = 1024 * 1024 * 500  # 500 MB
 
 # Startup and shutdown events
 @asynccontextmanager
