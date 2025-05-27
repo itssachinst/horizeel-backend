@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Form, Query, status, Path
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Form, Query, status, Path, BackgroundTasks
 from sqlalchemy.orm import Session
 from app.database import SessionLocal, get_db
 from app.crud import (
@@ -6,12 +6,13 @@ from app.crud import (
     video_likes_increment, video_dislikes_increment, 
     search_videos, save_video_for_user, unsave_video_for_user, 
     get_saved_videos_for_user, check_video_saved, delete_video,
-    get_user_videos
+    get_user_videos, get_video_status
 )
 from app.utils.s3_utils import upload_to_s3, convert_to_hls_and_upload
 from app.utils.youtube_utils import download_youtube_clip
-from app.schemas import VideoCreate, VideoResponse
+from app.schemas import VideoCreate, VideoResponse, VideoStatus
 from app.utils.auth import get_current_user, get_current_user_optional
+from app.utils.background_tasks import process_video_background, process_youtube_video_background
 from app.models import User, Video, WatchHistory, Like
 from typing import List, Optional
 from uuid import UUID
@@ -60,6 +61,7 @@ class SearchParams(BaseModel):
 
 @router.post("/videos/", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
 def upload_video(
+    background_tasks: BackgroundTasks,
     title: str = Form(...),
     description: str = Form(...),
     vfile: UploadFile = File(...),
@@ -68,7 +70,10 @@ def upload_video(
     db: Session = Depends(get_db)
 ):
     """
-    Upload a new video with HLS streaming support.
+    Upload a new video with background processing.
+    
+    The video will be immediately accepted and processing will happen in the background.
+    Use the /videos/{video_id}/status endpoint to check processing status.
     
     - **title**: Title of the video
     - **description**: Description of the video
@@ -76,51 +81,109 @@ def upload_video(
     - **tfile**: Thumbnail image for the video
     """
     try:
-        # Create a temporary directory for processing
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Save video file to temporary location using chunked reading
-            video_path = os.path.join(temp_dir, vfile.filename)
-            
-            # Write file in chunks to avoid memory issues with large files
-            chunk_size = 1024 * 1024  # 1MB chunks
-            with open(video_path, "wb") as buffer:
-                while True:
-                    chunk = vfile.file.read(chunk_size)
-                    if not chunk:
-                        break
-                    buffer.write(chunk)
-            
-            # Reset file cursor for potential future use
-            vfile.file.seek(0)
-            
-            # Convert video to HLS and upload to S3
-            video_url = convert_to_hls_and_upload(video_path, vfile.filename)
-            
-            # Save thumbnail to temporary location
-            thumbnail_path = os.path.join(temp_dir, tfile.filename)
-            with open(thumbnail_path, "wb") as buffer:
-                # Thumbnails are smaller, but still use chunked reading for consistency
-                while True:
-                    chunk = tfile.file.read(chunk_size)
-                    if not chunk:
-                        break
-                    buffer.write(chunk)
-            
-            # Reset thumbnail file cursor
-            tfile.file.seek(0)
-            
-            # Upload thumbnail to S3
-            thumbnail_url = upload_to_s3(thumbnail_path, tfile.filename)
-            
-            # Create video entry in database
-            video_data = {"title": title, "description": description}
-            return create_video(db, video_data, video_url, thumbnail_url, str(current_user.user_id))
+        # Check upload permission
+        if not current_user.uploadFlag:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to upload videos"
+            )
+        
+        # Create video entry in database with processing status
+        video_data = {"title": title, "description": description}
+        db_video = create_video(
+            db, 
+            video_data, 
+            "processing",  # Temporary placeholder URL
+            "processing",  # Temporary placeholder URL
+            str(current_user.user_id),
+            status='processing'
+        )
+        
+        # Save uploaded files to temporary location for background processing
+        import tempfile
+        temp_dir = tempfile.mkdtemp()
+        
+        # Save video file
+        video_path = os.path.join(temp_dir, f"{db_video.video_id}_{vfile.filename}")
+        chunk_size = 1024 * 1024  # 1MB chunks
+        with open(video_path, "wb") as buffer:
+            while True:
+                chunk = vfile.file.read(chunk_size)
+                if not chunk:
+                    break
+                buffer.write(chunk)
+        
+        # Save thumbnail file
+        thumbnail_path = os.path.join(temp_dir, f"{db_video.video_id}_{tfile.filename}")
+        with open(thumbnail_path, "wb") as buffer:
+            while True:
+                chunk = tfile.file.read(chunk_size)
+                if not chunk:
+                    break
+                buffer.write(chunk)
+        
+        # Add background task for video processing
+        background_tasks.add_task(
+            process_video_background,
+            db_video.video_id,
+            video_path,
+            thumbnail_path,
+            vfile.filename,
+            tfile.filename
+        )
+        
+        logger.info(f"Video upload accepted for background processing: {db_video.video_id}")
+        
+        return db_video
     
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error uploading video: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to upload video: {str(e)}"
+        )
+
+@router.get("/videos/{video_id}/status", response_model=VideoStatus)
+def get_video_processing_status(
+    video_id: UUID = Path(..., description="The UUID of the video to check status"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get the processing status of a video.
+    
+    - **video_id**: UUID of the video to check
+    
+    Returns:
+    - **processing**: Video is being processed
+    - **ready**: Video is ready for viewing
+    - **failed**: Video processing failed
+    - **published**: Video is published and ready
+    - **draft**: Video is in draft state
+    - **private**: Video is private
+    """
+    try:
+        video_status = get_video_status(db, video_id)
+        if video_status is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Video with ID {video_id} not found"
+            )
+        
+        return VideoStatus(
+            video_id=video_status.video_id,
+            status=video_status.status,
+            title=video_status.title,
+            created_at=video_status.created_at
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting video status: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get video status: {str(e)}"
         )
 
 @router.get("/videos/search", response_model=List[VideoResponse])
@@ -629,6 +692,7 @@ async def delete_watch_history(
 
 @router.post("/videos/youtube", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
 async def upload_youtube_video(
+    background_tasks: BackgroundTasks,
     youtube_url: str = Form(..., description="YouTube video URL"),
     title: str = Form(..., description="Video title"),
     description: str = Form(..., description="Video description"),
@@ -638,7 +702,10 @@ async def upload_youtube_video(
     db: Session = Depends(get_db)
 ):
     """
-    Download a YouTube video, convert it to HLS format, and upload to S3.
+    Download a YouTube video with background processing.
+    
+    The video will be immediately accepted and processing will happen in the background.
+    Use the /videos/{video_id}/status endpoint to check processing status.
     
     - **youtube_url**: URL of the YouTube video
     - **title**: Title for the video
@@ -652,6 +719,13 @@ async def upload_youtube_video(
     - YouTube URL will not be stored in the database
     """
     try:
+        # Check upload permission
+        if not current_user.uploadFlag:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You don't have permission to upload videos"
+            )
+        
         # Validate inputs
         if not youtube_url:
             raise HTTPException(
@@ -670,47 +744,32 @@ async def upload_youtube_video(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="End time must be greater than start time"
             )
-            
-        # Create a temporary directory
-        with tempfile.TemporaryDirectory() as temp_dir:
-            # Download video from YouTube
-            video_path, video_title, duration = download_youtube_clip(
-                youtube_url, 
-                temp_dir, 
-                start_time, 
-                end_time
-            )
-            
-            # If no title provided, use the YouTube video title
-            if not title.strip():
-                title = video_title
-                
-            # Convert the video to HLS and upload to S3
-            video_url = convert_to_hls_and_upload(video_path, f"{uuid.uuid4()}.mp4")
-            
-            # Create a thumbnail from the video
-            thumbnail_path = os.path.join(temp_dir, "thumbnail.jpg")
-            thumbnail_cmd = [
-                'ffmpeg', '-y',
-                '-i', video_path,
-                '-ss', '00:00:01',
-                '-vframes', '1',
-                thumbnail_path
-            ]
-            subprocess.run(thumbnail_cmd, check=True)
-            
-            # Upload thumbnail to S3
-            thumbnail_url = upload_to_s3(thumbnail_path, f"thumbnail_{uuid.uuid4()}.jpg")
-            
-            # Create video entry in database (without storing YouTube URL)
-            video_data = {
-                "title": title,
-                "description": description,
-                "duration": duration
-            }
-            
-            # Create the video in the database
-            return create_video(db, video_data, video_url, thumbnail_url, str(current_user.user_id))
+        
+        # Create video entry in database with processing status
+        video_data = {"title": title, "description": description}
+        db_video = create_video(
+            db, 
+            video_data, 
+            "processing",  # Temporary placeholder URL
+            "processing",  # Temporary placeholder URL
+            str(current_user.user_id),
+            status='processing'
+        )
+        
+        # Add background task for YouTube video processing
+        background_tasks.add_task(
+            process_youtube_video_background,
+            db_video.video_id,
+            youtube_url,
+            title,
+            description,
+            start_time,
+            end_time
+        )
+        
+        logger.info(f"YouTube video upload accepted for background processing: {db_video.video_id}")
+        
+        return db_video
             
     except HTTPException:
         raise

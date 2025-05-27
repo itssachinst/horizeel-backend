@@ -1,11 +1,26 @@
 from pydantic import BaseModel, validator, EmailStr
 from datetime import datetime
 from uuid import UUID
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Literal
 
 class VideoCreate(BaseModel):
     title: str
     description: str
+
+class VideoStatus(BaseModel):
+    video_id: UUID
+    status: Literal['draft', 'published', 'private', 'processing', 'ready', 'failed']
+    title: str
+    created_at: datetime
+    
+    @validator('video_id', pre=True)
+    def convert_uuid(cls, v):
+        if isinstance(v, str):
+            try:
+                return UUID(v)
+            except ValueError:
+                return v
+        return v
 
 class VideoResponse(VideoCreate):
     video_id: UUID
@@ -18,6 +33,7 @@ class VideoResponse(VideoCreate):
     profile_picture: Optional[str] = None
     views: int
     likes: int
+    status: Literal['draft', 'published', 'private', 'processing', 'ready', 'failed']
     created_at: datetime
     is_liked: bool = False
 

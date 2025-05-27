@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 
 AWS_ACCESS_KEY = "AKIA3RYC52TM7MKGCFUU"
 AWS_SECRET_KEY = "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"
-S3_BUCKET = "mypov-videos"
+S3_BUCKET = "horizeel"
 
 s3_client = boto3.client(
     "s3",
     aws_access_key_id=AWS_ACCESS_KEY,
     aws_secret_access_key=AWS_SECRET_KEY,
-    region_name="eu-north-1"
+    region_name="ap-south-1"
 )
 
 PROFILE_IMAGES_FOLDER = 'profile-images/'

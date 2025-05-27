@@ -21,7 +21,7 @@ class Video(Base):
     views = Column(BIGINT, default=0)
     likes = Column(BIGINT, default=0)
     dislikes = Column(BIGINT, default=0)
-    status = Column(ENUM('draft', 'published', 'private', name='video_status'), default='published')
+    status = Column(ENUM('draft', 'published', 'private', 'processing', 'ready', 'failed', name='video_status'), default='processing')
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

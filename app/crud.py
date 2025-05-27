@@ -24,7 +24,7 @@ SECRET_KEY = "your-secret-key-keep-it-secret"  # Change this in production!
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
-def create_video(db: Session, video: VideoCreate, vfile_url: str, tfile_url: str, user_id: str = None):
+def create_video(db: Session, video: VideoCreate, vfile_url: str, tfile_url: str, user_id: str = None, status: str = 'processing'):
     """Create a new video entry in the database"""
     try:
         # Convert user_id to UUID if it's a string
@@ -43,7 +43,8 @@ def create_video(db: Session, video: VideoCreate, vfile_url: str, tfile_url: str
             video_url=vfile_url,
             thumbnail_url=tfile_url,
             user_id=user_id_uuid,
-            duration=video.get("duration", 0)  # Set duration if provided
+            duration=video.get("duration", 0),  # Set duration if provided
+            status=status
         )
         db.add(db_video)
         db.commit()
@@ -102,6 +103,30 @@ def get_video(db: Session, video_id: Union[str, uuid4]):
         return video
     except Exception as e:
         logger.error(f"Failed to get video {video_id}: {str(e)}")
+        raise
+
+def get_video_status(db: Session, video_id: Union[str, uuid4]):
+    """
+    Get video status by its ID
+    """
+    try:
+        # Convert video_id to UUID if it's a string
+        video_id_uuid = video_id
+        if isinstance(video_id, str):
+            try:
+                video_id_uuid = UUID(video_id)
+            except ValueError:
+                logger.warning(f"Invalid UUID format for video_id: {video_id}")
+                return None
+        
+        # Query only the fields needed for status
+        video = db.query(Video.video_id, Video.status, Video.title, Video.created_at).filter(
+            Video.video_id == video_id_uuid
+        ).first()
+        
+        return video
+    except Exception as e:
+        logger.error(f"Failed to get video status {video_id}: {str(e)}")
         raise
 
 # Cache frequently accessed video lists to improve performance
