@@ -33,7 +33,7 @@ def upload_to_s3(file_path: str, file_name: str) -> str:
     logger.info(f"Uploading file to S3: {file_name}")
     s3_client.upload_file(file_path, S3_BUCKET, file_name, ExtraArgs={"ContentType": "video/mp4"})
     
-    return f"https://{S3_BUCKET}.s3.eu-north-1.amazonaws.com/{file_name}"
+    return f"https://{S3_BUCKET}.s3.ap-south-1.amazonaws.com/{file_name}"
 
 def validate_video_file(file_path: str) -> dict:
     """
@@ -234,7 +234,7 @@ def convert_to_hls_and_upload(input_path: str, filename: str) -> str:
                     raise HTTPException(status_code=500, detail="Failed to upload HLS files to S3")
         
         # Return the URL to the HLS playlist
-        url = f"https://{S3_BUCKET}.s3.eu-north-1.amazonaws.com/{s3_prefix}index.m3u8"
+        url = f"https://{S3_BUCKET}.s3.ap-south-1.amazonaws.com/{s3_prefix}index.m3u8"
         logger.info(f"HLS conversion and upload complete. URL: {url}")
         return url
 
