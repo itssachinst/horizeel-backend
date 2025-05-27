@@ -45,6 +45,7 @@ class User(Base):
     email = Column(String, nullable=False, unique=True)
     password_hash = Column(String, nullable=False)
     is_active = Column(Boolean, default=True)
+    uploadFlag = Column("uploadflag", Boolean, default=False, nullable=False)  # Map to lowercase column name
     # is_admin = Column(Boolean, default=False)  # Commented out as column doesn't exist in DB
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), onupdate=func.now())

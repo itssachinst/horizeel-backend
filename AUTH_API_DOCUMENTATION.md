@@ -3,7 +3,7 @@
 This document describes the authentication system and related endpoints in the backend.
 
 ## Base URL
-All endpoints are prefixed with `/api`
+All endpoints are prefixed with `/api/auth`
 
 ## Authentication Overview
 The system uses JWT (JSON Web Tokens) for authentication. Tokens are short-lived (30 minutes by default) and must be included in the `Authorization` header for protected endpoints.
@@ -24,13 +24,15 @@ The system uses JWT (JSON Web Tokens) for authentication. Tokens are short-lived
 ## Endpoints
 
 ### Login
-- **URL**: `/users/login`
+- **URL**: `/login`
 - **Method**: `POST`
 - **Auth required**: No
-- **Request Body**: Form Data
-  ```
-  username: string (email)
-  password: string
+- **Request Body**: JSON
+  ```json
+  {
+    "email": "user@example.com",
+    "password": "string"
+  }
   ```
 - **Success Response**: 
   - **Code**: 200 OK
@@ -45,6 +47,8 @@ The system uses JWT (JSON Web Tokens) for authentication. Tokens are short-lived
 - **Error Response**:
   - **Code**: 401 UNAUTHORIZED
   - **Content**: `{"detail": "Incorrect email or password"}`
+  - **Code**: 500 INTERNAL SERVER ERROR
+  - **Content**: `{"detail": "Login failed: error message"}`
 
 ### Token Endpoint (OAuth2)
 - **URL**: `/token`
@@ -54,7 +58,6 @@ The system uses JWT (JSON Web Tokens) for authentication. Tokens are short-lived
   ```
   username: string (email)
   password: string
-  grant_type: password
   ```
 - **Success Response**: 
   - **Code**: 200 OK
@@ -68,6 +71,37 @@ The system uses JWT (JSON Web Tokens) for authentication. Tokens are short-lived
 - **Error Response**:
   - **Code**: 401 UNAUTHORIZED
   - **Content**: `{"detail": "Incorrect username or password"}`
+  - **Code**: 500 INTERNAL SERVER ERROR
+  - **Content**: `{"detail": "Login failed: error message"}`
+
+### Direct Password Reset
+- **URL**: `/direct-reset-password`
+- **Method**: `POST`
+- **Auth required**: No
+- **Request Body**: JSON
+  ```json
+  {
+    "email": "user@example.com",
+    "new_password": "string"
+  }
+  ```
+  *Note: Password must be at least 6 characters and contain at least one digit*
+- **Success Response**: 
+  - **Code**: 200 OK
+  - **Content**:
+    ```json
+    {
+      "message": "Password has been reset successfully",
+      "status": "success"
+    }
+    ```
+- **Error Responses**:
+  - **Code**: 404 NOT FOUND
+  - **Content**: `{"detail": "User with this email not found"}`
+  - **Code**: 400 BAD REQUEST
+  - **Content**: `{"message": "Password must be at least 6 characters", "status": "error", "detail": "validation_error"}`
+  - **Code**: 500 INTERNAL SERVER ERROR
+  - **Content**: `{"detail": "Failed to reset password: error message"}`
 
 ## Security Notes
 1. Tokens are short-lived (30 minutes) for security
@@ -80,6 +114,7 @@ The system uses JWT (JSON Web Tokens) for authentication. Tokens are short-lived
 - **401 Unauthorized**: Invalid or expired token
 - **403 Forbidden**: Valid token but insufficient permissions
 - **400 Bad Request**: Invalid request format
+- **404 Not Found**: Resource not found
 - **500 Internal Server Error**: Server-side error
 
 ## Best Practices

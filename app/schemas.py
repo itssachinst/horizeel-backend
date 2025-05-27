@@ -58,12 +58,14 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     profile_picture: Optional[str] = None
     cover_image: Optional[str] = None
+    uploadFlag: Optional[bool] = None
 
 class UserResponse(BaseModel):
     user_id: UUID
     username: str
     email: str
     is_active: bool
+    uploadFlag: bool
     created_at: datetime
     updated_at: Optional[datetime] = None
     bio: Optional[str] = None
@@ -73,7 +75,7 @@ class UserResponse(BaseModel):
     feedback_updated_at: Optional[datetime] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
         
 class Token(BaseModel):
     access_token: str
@@ -99,7 +101,7 @@ class FollowResponse(BaseModel):
         return value
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class FollowerResponse(BaseModel):
     user_id: str
@@ -113,7 +115,7 @@ class FollowerResponse(BaseModel):
         return value
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class FollowStats(BaseModel):
     followers_count: int
@@ -126,16 +128,17 @@ class UserProfile(BaseModel):
     bio: Optional[str] = None
     profile_picture: Optional[str] = None
     social: Optional[Dict[str, str]] = None
+    uploadFlag: Optional[bool] = None
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class UserFeedback(BaseModel):
     """Schema for updating user feedback"""
     feedback: str
 
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "feedback": "I love this app! It's very intuitive and fun to use."
             }
@@ -146,7 +149,7 @@ class WaitingListCreate(BaseModel):
     email: EmailStr
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "email": "user@example.com"
             }
@@ -165,4 +168,4 @@ class WaitingListResponse(BaseModel):
         return value
     
     class Config:
-        orm_mode = True
+        from_attributes = True

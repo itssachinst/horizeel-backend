@@ -821,6 +821,8 @@ def update_user_profile(db: Session, user_id: Union[str, uuid.UUID], profile_dat
         user.bio = profile_data["bio"]
     if "profile_picture" in profile_data:
         user.profile_picture = profile_data["profile_picture"]
+    if "uploadFlag" in profile_data:
+        user.uploadFlag = profile_data["uploadFlag"]
     
     # Update social media fields if they exist in the model
     if "social" in profile_data and hasattr(user, "social"):
