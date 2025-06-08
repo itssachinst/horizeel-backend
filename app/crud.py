@@ -156,7 +156,7 @@ def list_videos(db: Session, skip: int = 0, limit: int = 20, user_id: str = None
         
         # If no user_id provided, return regular trending videos
         if not user_id_uuid:
-            videos = db.query(Video).order_by(
+            videos = db.query(Video).filter(Video.status == 'ready').order_by(
                 Video.views.desc(), 
                 Video.likes.desc(), 
                 Video.created_at.desc()
